@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Statistical modeling for Rust — OLS regression, hypothesis tests, descriptive stats, and more. A statsmodels-style library."
 license = "MIT"
+repository = "https://github.com/rogerneal/inferust"
+homepage = "https://github.com/rogerneal/inferust"
+documentation = "https://docs.rs/inferust"
+readme = "README.md"
 keywords = ["statistics", "regression", "hypothesis-testing", "data-science", "ols"]
 categories = ["science", "mathematics"]
 
