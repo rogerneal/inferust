@@ -1,0 +1,17 @@
+[package]
+name = "inferust"
+version = "0.1.0"
+edition = "2021"
+description = "Statistical modeling for Rust — OLS regression, hypothesis tests, descriptive stats, and more. A statsmodels-style library."
+license = "MIT"
+keywords = ["statistics", "regression", "hypothesis-testing", "data-science", "ols"]
+categories = ["science", "mathematics"]
+
+[[example]]
+name = "basic_ols"
+path = "examples/basic_ols.rs"
+
+[dependencies]
+nalgebra = "0.33"
+statrs = "0.17"
+thiserror = "1"
