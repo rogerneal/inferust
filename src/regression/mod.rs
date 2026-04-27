@@ -1,2 +1,2 @@
 pub mod ols;
-pub use ols::Ols;
+pub use ols::{Ols, OlsSolver};

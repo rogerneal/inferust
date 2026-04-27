@@ -120,6 +120,15 @@ fn sig_stars(p: f64) -> &'static str {
 
 // ── Builder ───────────────────────────────────────────────────────────────────
 
+/// Linear solver used for OLS coefficient estimation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OlsSolver {
+    /// Fast path for full-rank, well-conditioned designs.
+    Cholesky,
+    /// More stable path for tougher or poorly conditioned designs.
+    Svd,
+}
+
 /// Ordinary Least Squares regression.
 ///
 /// # Example
@@ -139,6 +148,7 @@ fn sig_stars(p: f64) -> &'static str {
 pub struct Ols {
     feature_names: Vec<String>,
     add_intercept: bool,
+    solver: OlsSolver,
 }
 
 impl Default for Ols {
@@ -153,12 +163,25 @@ impl Ols {
         Self {
             feature_names: Vec::new(),
             add_intercept: true,
+            solver: OlsSolver::Cholesky,
         }
     }
 
     /// Set human-readable names for the predictor columns.
     pub fn with_feature_names(mut self, names: Vec<String>) -> Self {
         self.feature_names = names;
+        self
+    }
+
+    /// Use a specific linear solver for coefficient estimation.
+    pub fn with_solver(mut self, solver: OlsSolver) -> Self {
+        self.solver = solver;
+        self
+    }
+
+    /// Use SVD decomposition for coefficient estimation.
+    pub fn stable(mut self) -> Self {
+        self.solver = OlsSolver::Svd;
         self
     }
 
@@ -199,11 +222,24 @@ impl Ols {
         let x_mat = DMatrix::from_row_slice(n, ncols, &design);
         let y_vec = DVector::from_column_slice(y);
 
-        // β = (X'X)⁻¹ X'y  (normal equations)
+        // β solves the least-squares normal system. The default path uses
+        // Cholesky to avoid the extra work and numerical noise of forming an
+        // inverse for coefficient estimation; SVD is available for tougher data.
         let xtx = x_mat.transpose() * &x_mat;
-        let xtx_inv = xtx.try_inverse().ok_or(InferustError::SingularMatrix)?;
         let xty = x_mat.transpose() * &y_vec;
-        let beta = &xtx_inv * xty;
+        let cholesky = xtx
+            .clone()
+            .cholesky()
+            .ok_or(InferustError::SingularMatrix)?;
+        let beta = match self.solver {
+            OlsSolver::Cholesky => cholesky.solve(&xty),
+            OlsSolver::Svd => x_mat
+                .clone()
+                .svd(true, true)
+                .solve(&y_vec, 1e-12)
+                .map_err(|_| InferustError::SingularMatrix)?,
+        };
+        let xtx_inv = cholesky.inverse();
 
         // Residuals and sums of squares.
         let y_hat = &x_mat * &beta;
@@ -258,9 +294,10 @@ impl Ols {
             1.0 - f_dist.cdf(f_statistic)
         };
 
-        // Information criteria (Akaike & Bayesian).
-        let n_params = ncols as f64 + 1.0; // coefficients + sigma^2
-        let log_lik = -0.5 * n as f64 * (2.0 * std::f64::consts::PI * s2).ln() - ssr / (2.0 * s2);
+        // Information criteria (Akaike & Bayesian), matching statsmodels OLS.
+        let n_params = ncols as f64;
+        let sigma2_mle = ssr / n as f64;
+        let log_lik = -0.5 * n as f64 * ((2.0 * std::f64::consts::PI * sigma2_mle).ln() + 1.0);
         let aic = -2.0 * log_lik + 2.0 * n_params;
         let bic = -2.0 * log_lik + n_params * (n as f64).ln();
 
@@ -293,5 +330,86 @@ impl Ols {
             k,
             feature_names,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Ols, OlsSolver};
+
+    fn assert_close(actual: f64, expected: f64, tolerance: f64) {
+        assert!(
+            (actual - expected).abs() <= tolerance,
+            "actual {actual} differed from expected {expected} by more than {tolerance}"
+        );
+    }
+
+    fn fixture() -> (Vec<Vec<f64>>, Vec<f64>) {
+        (
+            vec![
+                vec![1.0, 2.0],
+                vec![2.0, 1.0],
+                vec![3.0, 4.0],
+                vec![4.0, 3.0],
+                vec![5.0, 5.0],
+                vec![6.0, 7.0],
+            ],
+            vec![5.1, 5.9, 10.2, 10.8, 14.9, 19.1],
+        )
+    }
+
+    #[test]
+    fn matches_statsmodels_reference_values() {
+        let (x, y) = fixture();
+        let result = Ols::new().fit(&x, &y).unwrap();
+
+        let expected_coefficients = [1.1666007905138316, 1.656126482213441, 1.100988142292489];
+        let expected_std_errors = [
+            0.33848997525229785,
+            0.19115143770783555,
+            0.16554200102490418,
+        ];
+        let expected_t_statistics = [3.4464854967840353, 8.663949913600645, 6.650808468401055];
+        let expected_p_values = [
+            0.04104155628322375,
+            0.0032350213527919183,
+            0.006927626115340223,
+        ];
+
+        for (actual, expected) in result.coefficients.iter().zip(expected_coefficients) {
+            assert_close(*actual, expected, 1e-10);
+        }
+        for (actual, expected) in result.std_errors.iter().zip(expected_std_errors) {
+            assert_close(*actual, expected, 1e-10);
+        }
+        for (actual, expected) in result.t_statistics.iter().zip(expected_t_statistics) {
+            assert_close(*actual, expected, 1e-10);
+        }
+        for (actual, expected) in result.p_values.iter().zip(expected_p_values) {
+            assert_close(*actual, expected, 1e-10);
+        }
+
+        assert_close(result.r_squared, 0.9972162326394675, 1e-12);
+        assert_close(result.adj_r_squared, 0.9953603877324457, 1e-12);
+        assert_close(result.f_statistic, 537.3381303935711, 1e-9);
+        assert_close(result.f_p_value, 0.00014687551678395586, 1e-12);
+        assert_close(result.aic, 6.721473225061304, 1e-10);
+        assert_close(result.bic, 6.09675163274547, 1e-10);
+    }
+
+    #[test]
+    fn cholesky_and_svd_solvers_agree() {
+        let (x, y) = fixture();
+        let fast = Ols::new()
+            .with_solver(OlsSolver::Cholesky)
+            .fit(&x, &y)
+            .unwrap();
+        let stable = Ols::new().stable().fit(&x, &y).unwrap();
+
+        for (actual, expected) in fast.coefficients.iter().zip(stable.coefficients.iter()) {
+            assert_close(*actual, *expected, 1e-10);
+        }
+        assert_close(fast.r_squared, stable.r_squared, 1e-12);
+        assert_close(fast.aic, stable.aic, 1e-10);
     }
 }
