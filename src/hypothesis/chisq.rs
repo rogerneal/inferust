@@ -72,7 +72,10 @@ pub fn goodness_of_fit(observed: &[f64], expected: Option<&[f64]>) -> Result<Chi
 pub fn independence(table: &[Vec<f64>]) -> Result<ChiSqResult> {
     let rows = table.len();
     if rows < 2 {
-        return Err(InferustError::InsufficientData { needed: 2, got: rows });
+        return Err(InferustError::InsufficientData {
+            needed: 2,
+            got: rows,
+        });
     }
     let cols = table[0].len();
     if cols < 2 {
@@ -82,8 +85,9 @@ pub fn independence(table: &[Vec<f64>]) -> Result<ChiSqResult> {
     }
 
     let row_sums: Vec<f64> = table.iter().map(|r| r.iter().sum()).collect();
-    let col_sums: Vec<f64> =
-        (0..cols).map(|j| table.iter().map(|r| r[j]).sum()).collect();
+    let col_sums: Vec<f64> = (0..cols)
+        .map(|j| table.iter().map(|r| r[j]).sum())
+        .collect();
     let total: f64 = row_sums.iter().sum();
 
     let chi2: f64 = (0..rows)

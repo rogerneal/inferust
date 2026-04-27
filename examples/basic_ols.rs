@@ -40,7 +40,10 @@ fn main() {
         .unwrap();
     model.print_summary();
 
-    println!(" Predictions for first 3 obs: {:?}", &model.predict(&x[..3]));
+    println!(
+        " Predictions for first 3 obs: {:?}",
+        &model.predict(&x[..3])
+    );
 
     // ── 3. Hypothesis tests ──────────────────────────────────────────────────
     println!("\n╔══════════════════════════════╗");
@@ -70,10 +73,7 @@ fn main() {
     chisq::goodness_of_fit(&die_rolls, None).unwrap().print();
 
     // Independence: gender × preference contingency table
-    let table = vec![
-        vec![30.0, 10.0],
-        vec![15.0, 25.0],
-    ];
+    let table = vec![vec![30.0, 10.0], vec![15.0, 25.0]];
     chisq::independence(&table).unwrap().print();
 
     // ── 5. One-way ANOVA ─────────────────────────────────────────────────────
@@ -93,9 +93,7 @@ fn main() {
 
     let hours: Vec<f64> = x.iter().map(|r| r[0]).collect();
     let gpa: Vec<f64> = x.iter().map(|r| r[1]).collect();
-    let matrix =
-        correlation::correlation_matrix(&[hours.clone(), gpa.clone(), y.clone()])
-            .unwrap();
+    let matrix = correlation::correlation_matrix(&[hours.clone(), gpa.clone(), y.clone()]).unwrap();
     correlation::print_correlation_matrix(&matrix, &["hours", "gpa", "score"]);
 
     let r = correlation::spearman(&hours, &y).unwrap();

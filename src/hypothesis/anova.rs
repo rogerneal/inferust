@@ -27,11 +27,7 @@ impl AnovaResult {
         println!("──────────────────────────────────────────────────────────────────");
         println!(
             "{:<16} {:>6.0} {:>14.4} {:>14.4} {:>10.4}",
-            "Between groups",
-            self.df_between,
-            self.ss_between,
-            self.ms_between,
-            self.f_statistic
+            "Between groups", self.df_between, self.ss_between, self.ms_between, self.f_statistic
         );
         println!(
             "{:<16} {:>6.0} {:>14.4} {:>14.4}",
@@ -72,8 +68,7 @@ pub fn one_way(groups: &[&[f64]]) -> Result<AnovaResult> {
 
     let k = groups.len();
     let n_total: usize = groups.iter().map(|g| g.len()).sum();
-    let grand_mean: f64 =
-        groups.iter().flat_map(|g| g.iter()).sum::<f64>() / n_total as f64;
+    let grand_mean: f64 = groups.iter().flat_map(|g| g.iter()).sum::<f64>() / n_total as f64;
 
     let ss_between: f64 = groups
         .iter()
@@ -97,9 +92,8 @@ pub fn one_way(groups: &[&[f64]]) -> Result<AnovaResult> {
     let ms_within = ss_within / df_within;
     let f_statistic = ms_between / ms_within;
 
-    let f_dist = FisherSnedecor::new(df_between, df_within).map_err(|_| {
-        InferustError::InvalidInput("invalid F-distribution parameters".into())
-    })?;
+    let f_dist = FisherSnedecor::new(df_between, df_within)
+        .map_err(|_| InferustError::InvalidInput("invalid F-distribution parameters".into()))?;
     let p_value = 1.0 - f_dist.cdf(f_statistic);
 
     Ok(AnovaResult {

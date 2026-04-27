@@ -45,10 +45,7 @@ impl OlsResult {
         println!("═══════════════════════════════════════════════════════════════════");
         println!("                     OLS Regression Results                        ");
         println!("═══════════════════════════════════════════════════════════════════");
-        println!(
-            " Dep. variable: y          Observations  : {}",
-            self.n
-        );
+        println!(" Dep. variable: y          Observations  : {}", self.n);
         println!(
             " R²           : {:.6}   Adj. R²       : {:.6}",
             self.r_squared, self.adj_r_squared
@@ -93,7 +90,11 @@ impl OlsResult {
                 } else {
                     0.0
                 };
-                let offset = if self.feature_names[0] == "const" { 1 } else { 0 };
+                let offset = if self.feature_names[0] == "const" {
+                    1
+                } else {
+                    0
+                };
                 for (j, &xi) in row.iter().enumerate() {
                     sum += self.coefficients[offset + j] * xi;
                 }
@@ -200,9 +201,7 @@ impl Ols {
 
         // β = (X'X)⁻¹ X'y  (normal equations)
         let xtx = x_mat.transpose() * &x_mat;
-        let xtx_inv = xtx
-            .try_inverse()
-            .ok_or(InferustError::SingularMatrix)?;
+        let xtx_inv = xtx.try_inverse().ok_or(InferustError::SingularMatrix)?;
         let xty = x_mat.transpose() * &y_vec;
         let beta = &xtx_inv * xty;
 
@@ -222,13 +221,11 @@ impl Ols {
 
         // R² and adjusted R²
         let r_squared = if sst == 0.0 { 1.0 } else { 1.0 - ssr / sst };
-        let adj_r_squared =
-            1.0 - (1.0 - r_squared) * (n - 1) as f64 / df_resid as f64;
+        let adj_r_squared = 1.0 - (1.0 - r_squared) * (n - 1) as f64 / df_resid as f64;
 
         // Variance-covariance matrix of coefficients: Var(β) = s² (X'X)⁻¹
         let cov_beta = &xtx_inv * s2;
-        let std_errors: Vec<f64> =
-            (0..ncols).map(|i| cov_beta[(i, i)].sqrt()).collect();
+        let std_errors: Vec<f64> = (0..ncols).map(|i| cov_beta[(i, i)].sqrt()).collect();
 
         // t-statistics and p-values.
         let coefficients: Vec<f64> = beta.iter().cloned().collect();
@@ -255,15 +252,15 @@ impl Ols {
         let f_p_value = if f_statistic.is_nan() {
             f64::NAN
         } else {
-            let f_dist = FisherSnedecor::new(df_model, df_resid as f64)
-                .map_err(|_| InferustError::InvalidInput("invalid F distribution parameters".into()))?;
+            let f_dist = FisherSnedecor::new(df_model, df_resid as f64).map_err(|_| {
+                InferustError::InvalidInput("invalid F distribution parameters".into())
+            })?;
             1.0 - f_dist.cdf(f_statistic)
         };
 
         // Information criteria (Akaike & Bayesian).
         let n_params = ncols as f64 + 1.0; // coefficients + sigma^2
-        let log_lik = -0.5 * n as f64 * (2.0 * std::f64::consts::PI * s2).ln()
-            - ssr / (2.0 * s2);
+        let log_lik = -0.5 * n as f64 * (2.0 * std::f64::consts::PI * s2).ln() - ssr / (2.0 * s2);
         let aic = -2.0 * log_lik + 2.0 * n_params;
         let bic = -2.0 * log_lik + n_params * (n as f64).ln();
 

@@ -45,8 +45,7 @@ pub fn one_sample(data: &[f64], mu: f64) -> Result<TTestResult> {
         return Err(InferustError::InsufficientData { needed: 2, got: n });
     }
     let mean = data.iter().sum::<f64>() / n as f64;
-    let var =
-        data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1) as f64;
+    let var = data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1) as f64;
     let se = (var / n as f64).sqrt();
     let t = (mean - mu) / se;
     let df = (n - 1) as f64;
@@ -88,8 +87,8 @@ pub fn two_sample(a: &[f64], b: &[f64]) -> Result<TTestResult> {
     // Welch-Satterthwaite df
     let term_a = var_a / na;
     let term_b = var_b / nb;
-    let df = (term_a + term_b).powi(2)
-        / (term_a.powi(2) / (na - 1.0) + term_b.powi(2) / (nb - 1.0));
+    let df =
+        (term_a + term_b).powi(2) / (term_a.powi(2) / (na - 1.0) + term_b.powi(2) / (nb - 1.0));
 
     let dist = t_dist(df)?;
     let p = two_sided_p(&dist, t);
@@ -117,7 +116,11 @@ pub fn paired(before: &[f64], after: &[f64]) -> Result<TTestResult> {
             y_len: after.len(),
         });
     }
-    let diffs: Vec<f64> = before.iter().zip(after.iter()).map(|(a, b)| a - b).collect();
+    let diffs: Vec<f64> = before
+        .iter()
+        .zip(after.iter())
+        .map(|(a, b)| a - b)
+        .collect();
     one_sample(&diffs, 0.0).map(|mut r| {
         r.test_name = "Paired t-Test".to_string();
         r
@@ -128,7 +131,10 @@ pub fn paired(before: &[f64], after: &[f64]) -> Result<TTestResult> {
 
 fn check_len(data: &[f64], min: usize) -> Result<()> {
     if data.len() < min {
-        Err(InferustError::InsufficientData { needed: min, got: data.len() })
+        Err(InferustError::InsufficientData {
+            needed: min,
+            got: data.len(),
+        })
     } else {
         Ok(())
     }

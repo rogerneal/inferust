@@ -3,7 +3,7 @@
 [![Crates.io](https://img.shields.io/crates/v/inferust.svg)](https://crates.io/crates/inferust)
 [![Docs.rs](https://docs.rs/inferust/badge.svg)](https://docs.rs/inferust)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/rogerneal/inferust/ci.yml?branch=main)](https://github.com/rogerneal/inferust/actions)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/rogerneal/inferust/ci.yml?branch=master)](https://github.com/rogerneal/inferust/actions)
 
 **Statistical modeling for Rust** — a `statsmodels`-inspired library.
 

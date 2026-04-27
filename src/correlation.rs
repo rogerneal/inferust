@@ -16,7 +16,11 @@ pub fn pearson(x: &[f64], y: &[f64]) -> Result<f64> {
     let mx = x.iter().sum::<f64>() / n as f64;
     let my = y.iter().sum::<f64>() / n as f64;
 
-    let num: f64 = x.iter().zip(y.iter()).map(|(xi, yi)| (xi - mx) * (yi - my)).sum();
+    let num: f64 = x
+        .iter()
+        .zip(y.iter())
+        .map(|(xi, yi)| (xi - mx) * (yi - my))
+        .sum();
     let sx: f64 = x.iter().map(|xi| (xi - mx).powi(2)).sum::<f64>().sqrt();
     let sy: f64 = y.iter().map(|yi| (yi - my).powi(2)).sum::<f64>().sqrt();
 
@@ -54,8 +58,7 @@ pub fn correlation_matrix(variables: &[Vec<f64>]) -> Result<Vec<Vec<f64>>> {
             matrix[i][j] = if i == j {
                 1.0
             } else if j > i {
-                let r = pearson(&variables[i], &variables[j])?;
-                r
+                pearson(&variables[i], &variables[j])?
             } else {
                 matrix[j][i]
             };
@@ -87,8 +90,7 @@ pub fn print_correlation_matrix(matrix: &[Vec<f64>], names: &[&str]) {
 /// Convert a slice to its rank vector (average ranks for ties).
 fn rank(data: &[f64]) -> Vec<f64> {
     let n = data.len();
-    let mut indexed: Vec<(usize, f64)> =
-        data.iter().cloned().enumerate().map(|(i, v)| (i, v)).collect();
+    let mut indexed: Vec<(usize, f64)> = data.iter().cloned().enumerate().collect();
     indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
 
     let mut ranks = vec![0.0f64; n];

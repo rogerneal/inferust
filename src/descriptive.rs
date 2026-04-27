@@ -26,8 +26,7 @@ impl Summary {
         }
 
         let mean = data.iter().sum::<f64>() / n as f64;
-        let variance =
-            data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1) as f64;
+        let variance = data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1) as f64;
         let std = variance.sqrt();
 
         let mut sorted = data.to_vec();
