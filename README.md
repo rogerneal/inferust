@@ -15,7 +15,7 @@
 
 | Module | What you get | Python equivalent |
 |--------|-------------|-------------------|
-| `regression::Ols` | OLS with coefficients, std errors, t-stats, p-values, R², adj-R², F-stat, AIC, BIC | `statsmodels.OLS().fit()` |
+| `regression::Ols` | OLS with fast Cholesky and stable SVD solvers, coefficients, std errors, t-stats, p-values, R², adj-R², F-stat, AIC, BIC | `statsmodels.OLS().fit()` |
 | `hypothesis::ttest` | One-sample, two-sample Welch, paired t-tests with 95% CI | `scipy.stats.ttest_*` |
 | `hypothesis::chisq` | Goodness-of-fit and independence (contingency table) | `scipy.stats.chisquare`, `chi2_contingency` |
 | `hypothesis::anova` | One-way ANOVA table (SS, MS, F, p) | `scipy.stats.f_oneway` |
@@ -139,14 +139,55 @@ correlation::print_correlation_matrix(&matrix, &["hours", "gpa", "scores"]);
 ## OLS builder options
 
 ```rust
+use inferust::regression::{Ols, OlsSolver};
+
 Ols::new()                                        // intercept on by default
     .with_feature_names(vec!["x1".into()])        // label columns
+    .with_solver(OlsSolver::Cholesky)             // default fast path
     .no_intercept()                               // force through origin
+    .fit(&x, &y)
+    .unwrap();
+
+Ols::new()
+    .stable()                                    // SVD solver for tougher designs
     .fit(&x, &y)
     .unwrap();
 ```
 
 `OlsResult` also exposes `.predict(&x)` for out-of-sample predictions and all raw fields (`coefficients`, `residuals`, `r_squared`, `p_values`, etc.) for programmatic use.
+
+### Solver strategy
+
+`inferust` defaults to a Cholesky solve of the normal system for full-rank, well-conditioned OLS problems. This avoids the extra work of forming a full inverse for coefficient estimation and is the fastest path for typical dense data.
+
+For tougher or poorly conditioned designs, call `.stable()` or `.with_solver(OlsSolver::Svd)` to use the SVD path. The test suite includes statsmodels-derived reference values for coefficients, standard errors, t/p-values, R², F-statistics, AIC, and BIC.
+
+---
+
+## Benchmarks
+
+The repository includes reproducible OLS benchmark scripts for comparing `inferust` with Python `statsmodels` on deterministic synthetic data. Build and run the Rust benchmark in release mode:
+
+```bash
+cargo run --release --example bench_ols -- --rows 10000 --features 8 --repeats 10 --warmups 2
+cargo run --release --example bench_ols -- --solver svd --rows 10000 --features 8 --repeats 10 --warmups 2
+```
+
+Run the Python comparison after installing `numpy`, `scipy`, and `statsmodels`:
+
+```bash
+python scripts/bench_statsmodels.py --rows 10000 --features 8 --repeats 10 --warmups 2
+```
+
+On the current local benchmark machine, the 10,000 row × 8 feature case measured approximately:
+
+| Engine | Solver | Median fit time |
+|--------|--------|-----------------|
+| `inferust` | Cholesky | 0.769 ms |
+| `inferust` | SVD | 2.474 ms |
+| `statsmodels` | default OLS | 2.492 ms |
+
+Benchmark results vary by machine and BLAS/LAPACK configuration, so treat these as a local smoke test rather than a universal claim. The checksum printed by each script is useful for confirming both implementations fit equivalent data.
 
 ---
 

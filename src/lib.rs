@@ -6,10 +6,16 @@
 //!
 //! | Module | Contents |
 //! |--------|---------|
-//! | [`regression`] | OLS with full summary (coefs, std errors, t/p-values, R², AIC, BIC) |
+//! | [`regression`] | OLS with fast Cholesky and stable SVD solvers plus full summary output |
 //! | [`hypothesis`] | t-tests, chi-squared, one-way ANOVA |
 //! | [`descriptive`] | Summary stats (mean, std, skewness, kurtosis, quartiles) |
 //! | [`correlation`] | Pearson, Spearman, correlation matrices |
+//!
+//! ## OLS solver strategy
+//!
+//! [`regression::Ols`] defaults to a fast Cholesky solve for full-rank,
+//! well-conditioned designs. Use `.stable()` or
+//! [`regression::OlsSolver::Svd`] when you prefer the more robust SVD path.
 //!
 //! ## Quick start
 //!
