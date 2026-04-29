@@ -6,9 +6,11 @@
 //!
 //! | Module | Contents |
 //! |--------|---------|
-//! | [`regression`] | OLS with fast Cholesky and stable SVD solvers plus full summary output |
+//! | [`regression`] | OLS/WLS with fast/stable solvers, robust SEs, confidence intervals, influence/residual diagnostics, and full summary output |
+//! | [`glm`] | Binary logistic regression |
 //! | [`hypothesis`] | t-tests, chi-squared, one-way ANOVA |
 //! | [`descriptive`] | Summary stats (mean, std, skewness, kurtosis, quartiles) |
+//! | [`data`] | Minimal named-column data frame and formula-based OLS/WLS/logistic fitting |
 //! | [`correlation`] | Pearson, Spearman, correlation matrices |
 //!
 //! ## OLS solver strategy
@@ -16,6 +18,7 @@
 //! [`regression::Ols`] defaults to a fast Cholesky solve for full-rank,
 //! well-conditioned designs. Use `.stable()` or
 //! [`regression::OlsSolver::Svd`] when you prefer the more robust SVD path.
+//! Use `.robust()` or [`regression::OlsCovariance`] for HC robust inference.
 //!
 //! ## Quick start
 //!
@@ -33,8 +36,10 @@
 //! ```
 
 pub mod correlation;
+pub mod data;
 pub mod descriptive;
 pub mod error;
+pub mod glm;
 pub mod hypothesis;
 pub mod regression;
 

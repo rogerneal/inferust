@@ -15,11 +15,13 @@
 
 | Module | What you get | Python equivalent |
 |--------|-------------|-------------------|
-| `regression::Ols` | OLS with fast Cholesky and stable SVD solvers, coefficients, std errors, t-stats, p-values, R², adj-R², F-stat, AIC, BIC | `statsmodels.OLS().fit()` |
+| `regression::Ols` / `Wls` | OLS and weighted least squares with fast/stable solvers, classical/HC robust SEs, confidence intervals, influence diagnostics, residual diagnostics, t/z stats, p-values, R², adj-R², F-stat, AIC, BIC | `statsmodels.OLS().fit()`, `statsmodels.WLS().fit()` |
 | `hypothesis::ttest` | One-sample, two-sample Welch, paired t-tests with 95% CI | `scipy.stats.ttest_*` |
 | `hypothesis::chisq` | Goodness-of-fit and independence (contingency table) | `scipy.stats.chisquare`, `chi2_contingency` |
 | `hypothesis::anova` | One-way ANOVA table (SS, MS, F, p) | `scipy.stats.f_oneway` |
 | `descriptive::Summary` | mean, std, variance, min/max, quartiles, skewness, excess kurtosis | `pd.Series.describe()` |
+| `data::DataFrame` | named numeric columns and formula-based OLS/WLS/logistic fitting | `statsmodels.formula.api` basics |
+| `glm::Logistic` | binary logistic regression with MLE estimates and Wald inference | `statsmodels.Logit().fit()` |
 | `correlation` | Pearson, Spearman, full correlation matrix | `df.corr()` |
 
 ---
@@ -77,6 +79,50 @@ prior_gpa           8.166667    1.490421     5.4793   0.115581
  Significance codes:  *** p<0.001  ** p<0.01  * p<0.05  . p<0.1
 ═══════════════════════════════════════════════════════════════════
 ```
+
+### Formula-based fitting
+
+```rust
+use inferust::data::DataFrame;
+
+let frame = DataFrame::new()
+    .with_column("hours", vec![2.0, 5.0, 8.0, 11.0]).unwrap()
+    .with_column("gpa", vec![3.1, 3.7, 3.5, 3.6]).unwrap()
+    .with_column("score", vec![55.0, 70.0, 80.0, 90.0]).unwrap();
+
+let result = frame.ols("score ~ hours + gpa").unwrap();
+```
+
+Formula support is intentionally small for now: numeric columns and `response ~ x1 + x2` terms. Intercepts are handled by the regression builders.
+
+### Weighted least squares
+
+```rust
+use inferust::regression::Wls;
+
+let weights = vec![1.0, 0.8, 1.2, 1.5];
+let result = Wls::new()
+    .with_feature_names(vec!["hours_studied".into(), "prior_gpa".into()])
+    .fit(&x, &y, &weights)
+    .unwrap();
+
+result.print_summary();
+```
+
+### Logistic regression
+
+```rust
+use inferust::glm::Logistic;
+
+let result = Logistic::new()
+    .with_feature_names(vec!["x1".into(), "x2".into()])
+    .fit(&x, &binary_y)
+    .unwrap();
+
+let probabilities = result.predict_proba(&x);
+```
+
+You can also use `DataFrame::logistic("clicked ~ visits + age")` for formula-based fitting.
 
 ### Hypothesis tests
 
@@ -139,17 +185,24 @@ correlation::print_correlation_matrix(&matrix, &["hours", "gpa", "scores"]);
 ## OLS builder options
 
 ```rust
-use inferust::regression::{Ols, OlsSolver};
+use inferust::regression::{Ols, OlsCovariance, OlsSolver};
 
-Ols::new()                                        // intercept on by default
+let result = Ols::new()                         // intercept on by default
     .with_feature_names(vec!["x1".into()])        // label columns
     .with_solver(OlsSolver::Cholesky)             // default fast path
-    .no_intercept()                               // force through origin
+    .with_covariance(OlsCovariance::Hc1)          // robust standard errors
     .fit(&x, &y)
     .unwrap();
 
+let intervals = result.confidence_intervals(0.05).unwrap();
+let influence = result.influence();
+let diagnostics = result.diagnostics().unwrap();
+let cooks_distance = influence.cooks_distance;
+let durbin_watson = diagnostics.durbin_watson;
+
 Ols::new()
     .stable()                                    // SVD solver for tougher designs
+    .robust()                                    // shorthand for HC1 covariance
     .fit(&x, &y)
     .unwrap();
 ```
@@ -160,7 +213,7 @@ Ols::new()
 
 `inferust` defaults to a Cholesky solve of the normal system for full-rank, well-conditioned OLS problems. This avoids the extra work of forming a full inverse for coefficient estimation and is the fastest path for typical dense data.
 
-For tougher or poorly conditioned designs, call `.stable()` or `.with_solver(OlsSolver::Svd)` to use the SVD path. The test suite includes statsmodels-derived reference values for coefficients, standard errors, t/p-values, R², F-statistics, AIC, and BIC.
+For tougher or poorly conditioned designs, call `.stable()` or `.with_solver(OlsSolver::Svd)` to use the SVD path. For heteroskedasticity-consistent inference, use `.with_covariance(OlsCovariance::Hc0)`, `.Hc1`, `.Hc2`, `.Hc3`, or the `.robust()` HC1 shorthand. The test suite includes statsmodels-derived reference values for coefficients, classical and robust standard errors, t/z statistics, p-values, confidence intervals, leverage, internally studentized residuals, Cook's distance, DFFITS, Durbin-Watson, Jarque-Bera, residual skew/kurtosis, condition number, R², F-statistics, AIC, and BIC.
 
 ---
 
