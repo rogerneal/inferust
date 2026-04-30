@@ -20,8 +20,16 @@
 | `hypothesis::chisq` | Goodness-of-fit and independence (contingency table) | `scipy.stats.chisquare`, `chi2_contingency` |
 | `hypothesis::anova` | One-way ANOVA table (SS, MS, F, p) | `scipy.stats.f_oneway` |
 | `descriptive::Summary` | mean, std, variance, min/max, quartiles, skewness, excess kurtosis | `pd.Series.describe()` |
-| `data::DataFrame` | named numeric columns and formula-based OLS/WLS/logistic fitting | `statsmodels.formula.api` basics |
-| `glm::Logistic` | binary logistic regression with MLE estimates and Wald inference | `statsmodels.Logit().fit()` |
+| `data::DataFrame` | named numeric columns and formula-based OLS/WLS/logistic/Poisson fitting | `statsmodels.formula.api` basics |
+| `glm::Logistic` / `Poisson` | binary logistic and Poisson count regression with MLE estimates, Wald inference, covariance, residual diagnostics, likelihood-ratio tests, prediction intervals, classification metrics, and post-estimation helpers | `statsmodels.Logit().fit()`, `statsmodels.GLM(..., Poisson()).fit()` |
+| `discrete` | Probit, negative binomial, multinomial logit starters | `statsmodels.discrete` basics |
+| `glm_family` | generic Gaussian/Binomial/Poisson GLM dispatch | `statsmodels.GLM` basics |
+| `time_series` | AR/ARIMA starters, ACF, PACF, Ljung-Box diagnostics | `statsmodels.tsa` basics |
+| `diagnostics` | VIF, Breusch-Pagan, White, RESET diagnostics | `statsmodels.stats.diagnostic`, `outliers_influence` basics |
+| `evaluation` | regression/classification metrics, bootstrap mean intervals | common model-evaluation workflow |
+| `robust` | Huber robust linear regression | `statsmodels.RLM` basics |
+| `gee` | independence-working-correlation GEE starters | `statsmodels.GEE` basics |
+| `mixed` | random-intercept mixed linear model starter | `statsmodels.MixedLM` basics |
 | `correlation` | Pearson, Spearman, full correlation matrix | `df.corr()` |
 
 ---
@@ -93,7 +101,7 @@ let frame = DataFrame::new()
 let result = frame.ols("score ~ hours + gpa").unwrap();
 ```
 
-Formula support is intentionally small for now: numeric columns and `response ~ x1 + x2` terms. Intercepts are handled by the regression builders.
+Formula support includes numeric `response ~ x1 + x2` terms, plus treatment dummy expansion for numeric-coded categorical columns via `design_matrices_with_categorical` and `ols_with_categorical`. Intercepts are handled by the model builders.
 
 ### Weighted least squares
 
@@ -120,9 +128,36 @@ let result = Logistic::new()
     .unwrap();
 
 let probabilities = result.predict_proba(&x);
+let intervals = result.confidence_intervals(0.05).unwrap();
+let odds_ratios = result.odds_ratios();
+let marginal_effects = result.average_marginal_effects();
+let marginal_effect_table = result.average_marginal_effects_summary(0.05).unwrap();
+let residuals = result.residuals();
+let metrics = result.classification_metrics(0.5).unwrap();
+let lr_test = result.likelihood_ratio_test().unwrap();
 ```
 
-You can also use `DataFrame::logistic("clicked ~ visits + age")` for formula-based fitting.
+You can also use `DataFrame::logistic("clicked ~ visits + age")` for formula-based fitting. Logistic results expose fitted probabilities, covariance estimates, response/Pearson/deviance residuals, likelihood-ratio tests, classification metrics, and post-estimation helpers designed to mirror common `statsmodels.Logit` workflows.
+
+### Poisson regression
+
+```rust
+use inferust::glm::Poisson;
+
+let result = Poisson::new()
+    .with_feature_names(vec!["exposure".into(), "age".into()])
+    .fit(&x, &counts)
+    .unwrap();
+
+let expected_counts = result.predict(&x);
+let intervals = result.confidence_intervals(0.05).unwrap();
+let mean_intervals = result.fitted_mean_intervals(0.05).unwrap();
+let residuals = result.residuals();
+let incidence_rate_ratios = result.incidence_rate_ratios();
+let lr_test = result.likelihood_ratio_test().unwrap();
+```
+
+Poisson results include covariance estimates, fitted values, response/Pearson/deviance residuals, log-likelihood, null log-likelihood, pseudo-R², deviance, null deviance, Pearson chi-square, AIC, BIC, likelihood-ratio tests, and response-scale mean intervals. `DataFrame::poisson("count ~ exposure + age")` provides formula-based fitting.
 
 ### Hypothesis tests
 
@@ -217,6 +252,12 @@ For tougher or poorly conditioned designs, call `.stable()` or `.with_solver(Ols
 
 ---
 
+## Changelog
+
+Release history is tracked in [CHANGELOG.md](CHANGELOG.md), with an `Unreleased` section reserved for the next version before publication.
+
+---
+
 ## Benchmarks
 
 The repository includes reproducible OLS benchmark scripts for comparing `inferust` with Python `statsmodels` on deterministic synthetic data. Build and run the Rust benchmark in release mode:
@@ -224,6 +265,13 @@ The repository includes reproducible OLS benchmark scripts for comparing `inferu
 ```bash
 cargo run --release --example bench_ols -- --rows 10000 --features 8 --repeats 10 --warmups 2
 cargo run --release --example bench_ols -- --solver svd --rows 10000 --features 8 --repeats 10 --warmups 2
+```
+
+Additional examples:
+
+```bash
+cargo run --example diagnostics
+cargo run --example discrete_models
 ```
 
 Run the Python comparison after installing `numpy`, `scipy`, and `statsmodels`:

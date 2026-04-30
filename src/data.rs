@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::error::{InferustError, Result};
-use crate::glm::{Logistic, LogisticResult};
+use crate::glm::{Logistic, LogisticResult, Poisson, PoissonResult};
 use crate::regression::{Ols, OlsResult, Wls};
 
 /// Parsed formula of the form `y ~ x1 + x2`.
@@ -141,6 +141,54 @@ impl DataFrame {
         })
     }
 
+    /// Build design matrices with one-hot encoding for numeric-coded categorical columns.
+    /// The smallest sorted category is used as the reference level.
+    pub fn design_matrices_with_categorical(
+        &self,
+        formula: &str,
+        categorical: &[&str],
+    ) -> Result<DesignMatrices> {
+        let formula = Formula::parse(formula)?;
+        let y = self.column(&formula.response)?.to_vec();
+        let nrows = self.nrows();
+        let mut x = vec![Vec::new(); nrows];
+        let mut predictor_names = Vec::new();
+
+        for name in &formula.predictors {
+            let column = self.column(name)?;
+            if categorical.iter().any(|candidate| candidate == name) {
+                let mut levels = column.to_vec();
+                levels.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                levels.dedup_by(|a, b| (*a - *b).abs() < f64::EPSILON);
+                for level in levels.iter().skip(1) {
+                    predictor_names.push(format!("{name}[T.{level}]"));
+                    for row_idx in 0..nrows {
+                        x[row_idx].push(f64::from((column[row_idx] - *level).abs() < f64::EPSILON));
+                    }
+                }
+            } else {
+                predictor_names.push(name.clone());
+                for row_idx in 0..nrows {
+                    x[row_idx].push(column[row_idx]);
+                }
+            }
+        }
+
+        Ok(DesignMatrices {
+            x,
+            y,
+            predictor_names,
+        })
+    }
+
+    /// Fit OLS with numeric-coded categorical predictors expanded to treatment dummies.
+    pub fn ols_with_categorical(&self, formula: &str, categorical: &[&str]) -> Result<OlsResult> {
+        let design = self.design_matrices_with_categorical(formula, categorical)?;
+        Ols::new()
+            .with_feature_names(design.predictor_names)
+            .fit(&design.x, &design.y)
+    }
+
     /// Fit OLS from a formula like `score ~ hours + gpa`.
     pub fn ols(&self, formula: &str) -> Result<OlsResult> {
         let design = self.design_matrices(formula)?;
@@ -162,6 +210,14 @@ impl DataFrame {
     pub fn logistic(&self, formula: &str) -> Result<LogisticResult> {
         let design = self.design_matrices(formula)?;
         Logistic::new()
+            .with_feature_names(design.predictor_names)
+            .fit(&design.x, &design.y)
+    }
+
+    /// Fit Poisson regression from a formula like `count ~ exposure + age`.
+    pub fn poisson(&self, formula: &str) -> Result<PoissonResult> {
+        let design = self.design_matrices(formula)?;
+        Poisson::new()
             .with_feature_names(design.predictor_names)
             .fit(&design.x, &design.y)
     }
@@ -207,6 +263,25 @@ mod tests {
     }
 
     #[test]
+    fn categorical_formula_expands_treatment_dummies() {
+        let frame = DataFrame::new()
+            .with_column("group", vec![1.0, 1.0, 2.0, 2.0, 3.0, 3.0])
+            .unwrap()
+            .with_column("x", vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0])
+            .unwrap()
+            .with_column("y", vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+            .unwrap();
+        let design = frame
+            .design_matrices_with_categorical("y ~ group + x", &["group"])
+            .unwrap();
+        assert_eq!(
+            design.predictor_names,
+            vec!["group[T.2]", "group[T.3]", "x"]
+        );
+        assert_eq!(design.x[2], vec![1.0, 0.0, 0.0]);
+    }
+
+    #[test]
     fn formula_ols_matches_matrix_ols_reference() {
         let result = frame().ols("y ~ x1 + x2").unwrap();
         assert_close(result.coefficients[0], 1.1666007905138316, 1e-10);
@@ -221,6 +296,31 @@ mod tests {
         assert_close(result.coefficients[0], 1.0910621653414276, 1e-10);
         assert_close(result.coefficients[1], 1.6265313140792843, 1e-10);
         assert_close(result.coefficients[2], 1.139502728692733, 1e-10);
+        assert_eq!(result.feature_names, vec!["const", "x1", "x2"]);
+    }
+
+    #[test]
+    fn formula_poisson_fits_named_columns() {
+        let frame = DataFrame::new()
+            .with_column(
+                "x1",
+                vec![0.2, 0.8, 1.2, 1.9, 2.4, 2.9, 3.4, 3.9, 4.5, 5.0, 5.5, 6.0],
+            )
+            .unwrap()
+            .with_column(
+                "x2",
+                vec![1.0, 1.4, 1.1, 1.7, 2.2, 2.0, 2.8, 3.1, 3.5, 3.8, 4.0, 4.4],
+            )
+            .unwrap()
+            .with_column(
+                "y",
+                vec![
+                    1.0, 2.0, 1.0, 3.0, 4.0, 3.0, 6.0, 7.0, 8.0, 11.0, 12.0, 15.0,
+                ],
+            )
+            .unwrap();
+        let result = frame.poisson("y ~ x1 + x2").unwrap();
+        assert_close(result.coefficients[0], -0.2951503394477173, 1e-8);
         assert_eq!(result.feature_names, vec!["const", "x1", "x2"]);
     }
 

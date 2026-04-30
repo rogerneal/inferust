@@ -23,3 +23,11 @@ path = "examples/bench_ols.rs"
 nalgebra = "0.33"
 statrs = "0.17"
 thiserror = "1"
+
+[[example]]
+name = "diagnostics"
+path = "examples/diagnostics.rs"
+
+[[example]]
+name = "discrete_models"
+path = "examples/discrete_models.rs"
