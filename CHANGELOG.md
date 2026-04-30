@@ -4,14 +4,19 @@ All notable changes to `inferust` are documented here. This project follows sema
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-04-30
+
 ### Added
 - Logistic regression post-estimation helpers for coefficient confidence intervals, covariance matrices, odds ratios, fitted probabilities, and delta-method average marginal-effect inference.
 - Poisson count regression with MLE estimates, Wald inference, covariance matrices, fitted values, likelihood metrics, deviance, Pearson chi-square, AIC/BIC, incidence-rate ratios, prediction, formula fitting, and statsmodels parity tests.
 - GLM residual diagnostics, likelihood-ratio tests, logistic classification metrics, logistic linear predictors, Poisson linear predictors, null deviances, offsets/exposure, and response-scale Poisson mean intervals.
 - First-pass coverage for the remaining statsmodels roadmap: Probit, Negative Binomial, Multinomial Logit, generic GLM dispatch, categorical formula encoding, AR/ARIMA(p,d,0), Huber robust regression, independence GEE, and random-intercept mixed linear models.
-- Added cross-cutting diagnostics and evaluation utilities: VIF, Breusch-Pagan, White, RESET, ACF, PACF, Ljung-Box, regression metrics, confusion matrices, and bootstrap mean intervals.
-- Hardened starter modules with additional edge-case tests, validation checks, rustdoc coverage, and runnable examples for diagnostics and discrete models.
-- Changelog coverage for prior releases and a standing place to record future versions before publication.
+- Cross-cutting diagnostics and evaluation utilities: VIF, Breusch-Pagan, White, RESET, ACF, PACF, Ljung-Box, regression metrics, confusion matrices, and bootstrap mean intervals.
+- Runnable examples for diagnostics and discrete models.
+
+### Changed
+- Hardened starter modules with additional edge-case tests, validation checks, and rustdoc coverage.
+- Added changelog coverage for prior releases and a standing place to record future versions before publication.
 
 ## [0.1.5] - 2026-04-29
 
