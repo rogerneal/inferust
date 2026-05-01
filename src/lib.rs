@@ -6,15 +6,16 @@
 //!
 //! | Module | Contents |
 //! |--------|---------|
-//! | [`regression`] | OLS/WLS with fast/stable/HAC solvers, HC0-HC3 and Newey-West SEs, confidence intervals, influence diagnostics, full summary |
+//! | [`regression`] | OLS/WLS/GLS/FGLS plus rolling and recursive OLS with fast/stable/HAC solvers, HC0-HC3 and Newey-West SEs, confidence intervals, influence diagnostics, full summary |
 //! | [`glm`] | Binary logistic and Poisson regression with Wald inference, LRT, residual diagnostics, prediction intervals, classification metrics |
 //! | [`survival`] | Kaplan-Meier estimator, log-rank test, Cox proportional hazards regression |
-//! | [`time_series`] | Full ARIMA(p,d,q) via CSS, VAR, AR, ACF/PACF, Ljung-Box, ADF unit root, KPSS stationarity |
+//! | [`time_series`] | ARIMA/SARIMA/SARIMAX via CSS, VAR/VECM/VARMAX, AR, ACF/PACF, Ljung-Box, ADF unit root, KPSS stationarity |
 //! | [`hypothesis`] | t-tests, chi-squared, ANOVA, Mann-Whitney U, Kruskal-Wallis, KS tests, Shapiro-Wilk |
 //! | [`diagnostics`] | VIF, Breusch-Pagan, White, and RESET diagnostics |
 //! | [`discrete`] | Probit, negative binomial, and multinomial logit |
 //! | [`glm_family`] | Generic Gaussian/Binomial/Poisson GLM front-end |
 //! | [`evaluation`] | Regression/classification metrics and bootstrap intervals |
+//! | [`graphics`] | Dependency-light SVG plots for lines, scatter, residuals, and ACF bars |
 //! | [`robust`] | Huber robust linear regression |
 //! | [`gee`] | Independence-working-correlation GEE |
 //! | [`mixed`] | Random-intercept mixed linear model |
@@ -63,6 +64,7 @@ pub mod evaluation;
 pub mod gee;
 pub mod glm;
 pub mod glm_family;
+pub mod graphics;
 pub mod hypothesis;
 pub mod mixed;
 pub mod regression;

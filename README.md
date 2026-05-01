@@ -15,7 +15,8 @@
 
 | Module | What you get | Python equivalent |
 |--------|-------------|-------------------|
-| `regression::Ols` / `Wls` | OLS and weighted least squares with fast/stable solvers, classical/HC robust SEs, confidence intervals, influence diagnostics, residual diagnostics, t/z stats, p-values, R², adj-R², F-stat, AIC, BIC | `statsmodels.OLS().fit()`, `statsmodels.WLS().fit()` |
+| `regression::Ols` / `Wls` / `Gls` / `Fgls` | OLS, weighted least squares, GLS with known covariance, and AR(1) feasible GLS with fast/stable solvers, robust/HAC SEs, confidence intervals, influence diagnostics, residual diagnostics, t/z stats, p-values, R², adj-R², F-stat, AIC, BIC | `statsmodels.OLS().fit()`, `statsmodels.WLS().fit()`, `statsmodels.GLS().fit()`, `statsmodels.GLSAR()` |
+| `regression::RollingOls` / `RecursiveOls` | Rolling-window coefficient paths and recursive OLS with CUSUM stability diagnostics | `statsmodels.regression.rolling.RollingOLS`, `statsmodels.regression.recursive_ls.RecursiveLS` basics |
 | `hypothesis::ttest` | One-sample, two-sample Welch, paired t-tests with 95% CI | `scipy.stats.ttest_*` |
 | `hypothesis::chisq` | Goodness-of-fit and independence (contingency table) | `scipy.stats.chisquare`, `chi2_contingency` |
 | `hypothesis::anova` | One-way ANOVA table (SS, MS, F, p) | `scipy.stats.f_oneway` |
@@ -24,7 +25,8 @@
 | `glm::Logistic` / `Poisson` | binary logistic and Poisson count regression with MLE estimates, Wald inference, covariance, residual diagnostics, likelihood-ratio tests, prediction intervals, classification metrics, and post-estimation helpers | `statsmodels.Logit().fit()`, `statsmodels.GLM(..., Poisson()).fit()` |
 | `discrete` | Probit, negative binomial, multinomial logit starters | `statsmodels.discrete` basics |
 | `glm_family` | generic Gaussian/Binomial/Poisson GLM dispatch | `statsmodels.GLM` basics |
-| `time_series` | AR/ARIMA starters, ACF, PACF, Ljung-Box diagnostics | `statsmodels.tsa` basics |
+| `time_series` | AR, ARIMA, SARIMA/SARIMAX, VAR, VECM, VARMAX starters plus ACF, PACF, Ljung-Box, ADF, and KPSS diagnostics | `statsmodels.tsa` basics |
+| `graphics` | dependency-light SVG line, scatter, residual, and ACF plots | `statsmodels.graphics` basics |
 | `diagnostics` | VIF, Breusch-Pagan, White, RESET diagnostics | `statsmodels.stats.diagnostic`, `outliers_influence` basics |
 | `evaluation` | regression/classification metrics, bootstrap mean intervals | common model-evaluation workflow |
 | `robust` | Huber robust linear regression | `statsmodels.RLM` basics |
@@ -115,6 +117,20 @@ let result = Wls::new()
     .unwrap();
 
 result.print_summary();
+```
+
+### GLS and rolling regression
+
+```rust
+use inferust::regression::{Fgls, RollingOls};
+
+let fgls = Fgls::new()
+    .with_feature_names(vec!["x".into()])
+    .fit(&x, &y)
+    .unwrap();
+
+let rolling = RollingOls::new(12).fit(&x, &y).unwrap();
+let slopes = rolling.slopes();
 ```
 
 ### Logistic regression
@@ -213,6 +229,19 @@ let rs = correlation::spearman(&x, &y).unwrap();
 
 let matrix = correlation::correlation_matrix(&[hours, gpa, scores]).unwrap();
 correlation::print_correlation_matrix(&matrix, &["hours", "gpa", "scores"]);
+```
+
+### Time series and graphics
+
+```rust
+use inferust::graphics::{acf_plot_svg, PlotOptions};
+use inferust::time_series::{acf, Sarima, Varmax};
+
+let sarima = Sarima::new(1, 1, 1, 1, 1, 0, 12).fit(&series).unwrap();
+let forecast = sarima.forecast(&series, 6).unwrap();
+
+let acf_values = acf(&series, 24).unwrap();
+let svg = acf_plot_svg(&acf_values, PlotOptions::default()).unwrap();
 ```
 
 ---

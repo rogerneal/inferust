@@ -14,6 +14,7 @@
 
 use crate::error::{InferustError, Result};
 use crate::regression::Ols;
+use nalgebra::{DMatrix, DVector};
 use statrs::distribution::{ChiSquared, ContinuousCDF};
 
 // ── AutoRegressive ────────────────────────────────────────────────────────────
@@ -179,7 +180,13 @@ impl Arima {
     /// * `d` – number of differences to apply before fitting
     /// * `q` – number of MA lags
     pub fn new(p: usize, d: usize, q: usize) -> Self {
-        Self { p, d, q, max_iter: 2000, tolerance: 1e-7 }
+        Self {
+            p,
+            d,
+            q,
+            max_iter: 2000,
+            tolerance: 1e-7,
+        }
     }
 
     /// Override the maximum number of CSS optimiser iterations (default 2000).
@@ -222,10 +229,14 @@ impl Arima {
                     ma_coefficients: vec![],
                     fitted_values: vec![mu; n],
                     residuals: resids.clone(),
-                    sigma2, log_likelihood: ll,
+                    sigma2,
+                    log_likelihood: ll,
                     aic: -2.0 * ll + 2.0 * k as f64,
                     bic: -2.0 * ll + k as f64 * (n as f64).ln(),
-                    n, p: 0, d: self.d, q: 0,
+                    n,
+                    p: 0,
+                    d: self.d,
+                    q: 0,
                     original_tails,
                     last_residuals: resids,
                 });
@@ -241,10 +252,14 @@ impl Arima {
                 ma_coefficients: vec![],
                 fitted_values: ar.fitted_values,
                 residuals: ar.residuals,
-                sigma2, log_likelihood: ll,
+                sigma2,
+                log_likelihood: ll,
                 aic: -2.0 * ll + 2.0 * k as f64,
                 bic: -2.0 * ll + k as f64 * (n as f64).ln(),
-                n, p: self.p, d: self.d, q: 0,
+                n,
+                p: self.p,
+                d: self.d,
+                q: 0,
                 original_tails,
                 last_residuals,
             });
@@ -259,7 +274,9 @@ impl Arima {
             if let Ok(ar) = AutoRegressive::new(self.p).fit(&series) {
                 init[0] = ar.intercept;
                 for (i, &c) in ar.coefficients.iter().enumerate() {
-                    if 1 + i < k { init[1 + i] = c; }
+                    if 1 + i < k {
+                        init[1 + i] = c;
+                    }
                 }
             }
         }
@@ -268,7 +285,14 @@ impl Arima {
             init[1 + self.p + i] = 0.01;
         }
 
-        let params = css_optimize(&series, self.p, self.q, &init, self.max_iter, self.tolerance);
+        let params = css_optimize(
+            &series,
+            self.p,
+            self.q,
+            &init,
+            self.max_iter,
+            self.tolerance,
+        );
         let (fitted, resids) = css_fitted_residuals(&params, &series, self.p, self.q);
         let n = fitted.len();
         let sigma2 = if n > 1 {
@@ -285,10 +309,14 @@ impl Arima {
             ma_coefficients: params[self.p + 1..].to_vec(),
             fitted_values: fitted,
             residuals: resids,
-            sigma2, log_likelihood: ll,
+            sigma2,
+            log_likelihood: ll,
             aic: -2.0 * ll + 2.0 * k as f64,
             bic: -2.0 * ll + k as f64 * (n as f64).ln(),
-            n, p: self.p, d: self.d, q: self.q,
+            n,
+            p: self.p,
+            d: self.d,
+            q: self.q,
             original_tails,
             last_residuals,
         })
@@ -322,7 +350,9 @@ impl ArimaResult {
     /// `history` should be the full original series passed to [`Arima::fit`].
     /// The last few values are used for the AR recursion and for undifferencing.
     pub fn forecast(&self, history: &[f64], steps: usize) -> Result<Vec<f64>> {
-        if steps == 0 { return Ok(vec![]); }
+        if steps == 0 {
+            return Ok(vec![]);
+        }
         let p = self.p;
         let q = self.q;
 
@@ -330,7 +360,10 @@ impl ArimaResult {
         let mut diff_hist = history.to_vec();
         for _ in 0..self.d {
             if diff_hist.len() < 2 {
-                return Err(InferustError::InsufficientData { needed: 2, got: diff_hist.len() });
+                return Err(InferustError::InsufficientData {
+                    needed: 2,
+                    got: diff_hist.len(),
+                });
             }
             diff_hist = diff_hist.windows(2).map(|w| w[1] - w[0]).collect();
         }
@@ -342,7 +375,9 @@ impl ArimaResult {
         let copy_from = buf.len().saturating_sub(self.last_residuals.len());
         for (i, &e) in self.last_residuals.iter().enumerate() {
             let idx = copy_from + i;
-            if idx < eps_buf.len() { eps_buf[idx] = e; }
+            if idx < eps_buf.len() {
+                eps_buf[idx] = e;
+            }
         }
 
         let mut diff_fcast = Vec::with_capacity(steps);
@@ -351,7 +386,9 @@ impl ArimaResult {
             let mut pred = self.intercept;
             // AR terms
             for i in 0..p {
-                if t > i { pred += self.ar_coefficients[i] * buf[t - 1 - i]; }
+                if t > i {
+                    pred += self.ar_coefficients[i] * buf[t - 1 - i];
+                }
             }
             // MA terms: only past residuals contribute (future ε = 0)
             for j in 0..q {
@@ -361,7 +398,8 @@ impl ArimaResult {
                     let lookback = j - step; // how many steps before the last in-sample residual
                     let lr_len = self.last_residuals.len();
                     if lookback < lr_len {
-                        pred += self.ma_coefficients[j] * self.last_residuals[lr_len - 1 - lookback];
+                        pred +=
+                            self.ma_coefficients[j] * self.last_residuals[lr_len - 1 - lookback];
                     }
                 }
                 // else: future ε = 0, contributes nothing
@@ -431,7 +469,14 @@ fn css_gradient(params: &[f64], y: &[f64], p: usize, q: usize) -> Vec<f64> {
 }
 
 /// Minimise the CSS objective with the Adam optimiser.
-fn css_optimize(y: &[f64], p: usize, q: usize, init: &[f64], max_iter: usize, tol: f64) -> Vec<f64> {
+fn css_optimize(
+    y: &[f64],
+    p: usize,
+    q: usize,
+    init: &[f64],
+    max_iter: usize,
+    tol: f64,
+) -> Vec<f64> {
     let mut params = init.to_vec();
     let np = params.len();
     let (alpha, beta1, beta2, eps) = (0.05_f64, 0.9_f64, 0.999_f64, 1e-8_f64);
@@ -440,7 +485,9 @@ fn css_optimize(y: &[f64], p: usize, q: usize, init: &[f64], max_iter: usize, to
     for iter in 1..=max_iter {
         let grad = css_gradient(&params, y, p, q);
         let gnorm: f64 = grad.iter().map(|g| g * g).sum::<f64>().sqrt();
-        if gnorm < tol { break; }
+        if gnorm < tol {
+            break;
+        }
         let t = iter as f64;
         for i in 0..np {
             m[i] = beta1 * m[i] + (1.0 - beta1) * grad[i];
@@ -480,6 +527,22 @@ fn gaussian_log_likelihood(residuals: &[f64], sigma2: f64) -> f64 {
     let s2 = sigma2.max(f64::EPSILON);
     -0.5 * n * (2.0 * std::f64::consts::PI * s2).ln()
         - 0.5 * residuals.iter().map(|e| e * e).sum::<f64>() / s2
+}
+
+fn regularized_inverse(matrix: &DMatrix<f64>) -> Result<DMatrix<f64>> {
+    if let Some(inv) = matrix.clone().try_inverse() {
+        return Ok(inv);
+    }
+    let mut ridge = matrix.clone();
+    let scale = matrix.trace().abs().max(1.0) * 1e-10;
+    for i in 0..ridge.nrows().min(ridge.ncols()) {
+        ridge[(i, i)] += scale;
+    }
+    ridge.try_inverse().ok_or(InferustError::SingularMatrix)
+}
+
+fn row_dot_matrix(x: &DMatrix<f64>, row: usize, beta: &DVector<f64>) -> f64 {
+    (0..x.ncols()).map(|col| x[(row, col)] * beta[col]).sum()
 }
 
 // ── VAR ───────────────────────────────────────────────────────────────────────
@@ -540,7 +603,9 @@ impl Var {
             ));
         }
         if self.lags == 0 {
-            return Err(InferustError::InvalidInput("VAR lags must be at least 1".into()));
+            return Err(InferustError::InvalidInput(
+                "VAR lags must be at least 1".into(),
+            ));
         }
         let t = series[0].len();
         for (i, s) in series.iter().enumerate() {
@@ -560,38 +625,35 @@ impl Var {
             });
         }
 
-        // Build regressor matrix: for each time t >= lags,
-        // row = [y1_{t-1}, ..., yk_{t-1}, y1_{t-2}, ..., yk_{t-lags}]
-        let mut x: Vec<Vec<f64>> = Vec::with_capacity(n);
-        for t_idx in self.lags..t {
-            let mut row = Vec::with_capacity(k * self.lags);
-            for lag in 1..=self.lags {
-                for var in series.iter() {
-                    row.push(var[t_idx - lag]);
-                }
+        let x_cols = k * self.lags + 1;
+        let x_mat = DMatrix::from_fn(n, x_cols, |row, col| {
+            if col == 0 {
+                1.0
+            } else {
+                let t_idx = row + self.lags;
+                let lag_col = col - 1;
+                let lag = lag_col / k + 1;
+                let var = lag_col % k;
+                series[var][t_idx - lag]
             }
-            x.push(row);
-        }
-
-        // Feature names for VAR regressors
-        let feat_names: Vec<String> = (1..=self.lags)
-            .flat_map(|lag| (1..=k).map(move |v| format!("L{}.y{}", lag, v)))
-            .collect();
+        });
+        let xtx_inv = regularized_inverse(&(x_mat.transpose() * &x_mat))?;
 
         let mut coefficients = Vec::with_capacity(k);
         let mut residuals_all = Vec::with_capacity(k);
         let mut total_ll = 0.0_f64;
-        let total_params = k * (k * self.lags + 1); // intercepts + slope params across all eq.
+        let total_params = k * x_cols;
 
         for var in series.iter() {
-            let y_eq: Vec<f64> = var[self.lags..].to_vec();
-            let ols = Ols::new()
-                .with_feature_names(feat_names.clone())
-                .fit(&x, &y_eq)?;
-            let ll = gaussian_log_likelihood(&ols.residuals, ols.mse_resid);
+            let y_eq = DVector::from_fn(n, |row, _| var[row + self.lags]);
+            let beta = &xtx_inv * (x_mat.transpose() * &y_eq);
+            let fitted = &x_mat * &beta;
+            let resids: Vec<f64> = y_eq.iter().zip(fitted.iter()).map(|(a, b)| a - b).collect();
+            let sigma2 = resids.iter().map(|e| e * e).sum::<f64>() / n.max(1) as f64;
+            let ll = gaussian_log_likelihood(&resids, sigma2);
             total_ll += ll;
-            coefficients.push(ols.coefficients);
-            residuals_all.push(ols.residuals);
+            coefficients.push(beta.iter().copied().collect());
+            residuals_all.push(resids);
         }
 
         let n_f = n as f64;
@@ -616,7 +678,9 @@ impl VarResult {
     ///
     /// Returns a `Vec` of length k, each element a `Vec<f64>` of length `steps`.
     pub fn forecast(&self, history: &[Vec<f64>], steps: usize) -> Result<Vec<Vec<f64>>> {
-        if steps == 0 { return Ok(vec![vec![]; self.k]); }
+        if steps == 0 {
+            return Ok(vec![vec![]; self.k]);
+        }
         if history.len() != self.k {
             return Err(InferustError::DimensionMismatch {
                 x_rows: history.len(),
@@ -631,13 +695,19 @@ impl VarResult {
             let mut row = Vec::with_capacity(self.k * self.lags);
             for lag in 1..=self.lags {
                 for buf in bufs.iter() {
-                    if t >= lag { row.push(buf[t - lag]); } else { row.push(0.0); }
+                    if t >= lag {
+                        row.push(buf[t - lag]);
+                    } else {
+                        row.push(0.0);
+                    }
                 }
             }
             for (i, coefs) in self.coefficients.iter().enumerate() {
                 let mut pred = coefs[0]; // intercept
                 for (j, &c) in coefs[1..].iter().enumerate() {
-                    if j < row.len() { pred += c * row[j]; }
+                    if j < row.len() {
+                        pred += c * row[j];
+                    }
                 }
                 bufs[i].push(pred);
                 out[i].push(pred);
@@ -665,17 +735,25 @@ pub struct LjungBoxResult {
 /// Returns a vector of length `max_lag + 1`; element 0 is always 1.0.
 pub fn acf(series: &[f64], max_lag: usize) -> Result<Vec<f64>> {
     if series.len() < 2 {
-        return Err(InferustError::InsufficientData { needed: 2, got: series.len() });
+        return Err(InferustError::InsufficientData {
+            needed: 2,
+            got: series.len(),
+        });
     }
     let mean = series.iter().sum::<f64>() / series.len() as f64;
     let denom = series.iter().map(|v| (v - mean).powi(2)).sum::<f64>();
     Ok((0..=max_lag)
         .map(|lag| {
-            if lag == 0 { return 1.0; }
-            series.iter().skip(lag)
+            if lag == 0 {
+                return 1.0;
+            }
+            series
+                .iter()
+                .skip(lag)
                 .zip(series.iter())
                 .map(|(a, b)| (a - mean) * (b - mean))
-                .sum::<f64>() / denom.max(f64::EPSILON)
+                .sum::<f64>()
+                / denom.max(f64::EPSILON)
         })
         .collect())
 }
@@ -700,8 +778,13 @@ pub fn ljung_box(series: &[f64], max_lag: usize) -> Result<Vec<LjungBoxResult>> 
     let n = series.len() as f64;
     let mut results = Vec::with_capacity(max_lag);
     for lag in 1..=max_lag {
-        let stat = n * (n + 2.0)
-            * rhos.iter().enumerate().skip(1).take(lag)
+        let stat = n
+            * (n + 2.0)
+            * rhos
+                .iter()
+                .enumerate()
+                .skip(1)
+                .take(lag)
                 .map(|(k, rho)| rho.powi(2) / (n - k as f64))
                 .sum::<f64>();
         let chi = ChiSquared::new(lag as f64)
@@ -741,14 +824,21 @@ impl AdfResult {
         println!();
         println!("── Augmented Dickey-Fuller Test ───────────────────────────");
         println!("  H₀: unit root  (reject when stat << critical value)");
-        println!("  Lags: {}   n: {}   stat: {:.4}   p ≈ {:.4}",
-            self.lags, self.n, self.statistic, self.p_value);
+        println!(
+            "  Lags: {}   n: {}   stat: {:.4}   p ≈ {:.4}",
+            self.lags, self.n, self.statistic, self.p_value
+        );
         let [cv1, cv5, cv10] = self.critical_values;
         println!("  Critical values: 1% {cv1:.3}   5% {cv5:.3}   10% {cv10:.3}");
-        let sig = if self.statistic < cv1 { "***" }
-            else if self.statistic < cv5 { "**" }
-            else if self.statistic < cv10 { "*" }
-            else { "(not significant)" };
+        let sig = if self.statistic < cv1 {
+            "***"
+        } else if self.statistic < cv5 {
+            "**"
+        } else if self.statistic < cv10 {
+            "*"
+        } else {
+            "(not significant)"
+        };
         println!("  Verdict: {sig}");
         println!();
     }
@@ -768,7 +858,10 @@ pub fn adf_test(y: &[f64], lags: usize) -> Result<AdfResult> {
     let n = y.len();
     let min_len = lags + 3;
     if n < min_len {
-        return Err(InferustError::InsufficientData { needed: min_len, got: n });
+        return Err(InferustError::InsufficientData {
+            needed: min_len,
+            got: n,
+        });
     }
 
     // First difference
@@ -779,7 +872,10 @@ pub fn adf_test(y: &[f64], lags: usize) -> Result<AdfResult> {
     let t_start = lags + 1;
     let n_obs = n - 1 - t_start; // number of valid rows
     if n_obs < 2 {
-        return Err(InferustError::InsufficientData { needed: t_start + 3, got: n });
+        return Err(InferustError::InsufficientData {
+            needed: t_start + 3,
+            got: n,
+        });
     }
 
     let mut x: Vec<Vec<f64>> = Vec::with_capacity(n_obs);
@@ -835,9 +931,15 @@ fn mackinnon_critical_values_constant(n: usize) -> [f64; 3] {
 /// value.  Accuracy is ±0.01 in the 0.01–0.20 range; treat as indicative outside.
 fn mackinnon_pvalue_constant(stat: f64, n: usize) -> f64 {
     let [cv1, cv5, cv10] = mackinnon_critical_values_constant(n);
-    if stat <= cv1  { return 0.01; }
-    if stat <= cv5  { return 0.01 + 0.04 * (stat - cv1)  / (cv5  - cv1); }
-    if stat <= cv10 { return 0.05 + 0.05 * (stat - cv5)  / (cv10 - cv5); }
+    if stat <= cv1 {
+        return 0.01;
+    }
+    if stat <= cv5 {
+        return 0.01 + 0.04 * (stat - cv1) / (cv5 - cv1);
+    }
+    if stat <= cv10 {
+        return 0.05 + 0.05 * (stat - cv5) / (cv10 - cv5);
+    }
     // Above the 10 % critical value → p > 0.10.
     // Scale logistically between 0.10 and 0.99 as stat rises toward 0.
     let z = (stat - cv10) / (cv10.abs().max(0.1)); // normalised distance above cv10
@@ -872,13 +974,21 @@ impl KpssResult {
         println!();
         println!("── KPSS Stationarity Test ({spec}) ────────────────────────");
         println!("  H₀: series is stationary  (reject when stat > critical value)");
-        println!("  Lags: {}   n: {}   stat: {:.4}", self.lags, self.n, self.statistic);
+        println!(
+            "  Lags: {}   n: {}   stat: {:.4}",
+            self.lags, self.n, self.statistic
+        );
         let [cv10, cv5, cv1] = self.critical_values;
         println!("  Critical values: 10% {cv10:.3}   5% {cv5:.3}   1% {cv1:.3}");
-        let sig = if self.statistic > cv1 { "reject H₀ at 1% ***" }
-            else if self.statistic > cv5 { "reject H₀ at 5% **" }
-            else if self.statistic > cv10 { "reject H₀ at 10% *" }
-            else { "fail to reject H₀ (evidence of stationarity)" };
+        let sig = if self.statistic > cv1 {
+            "reject H₀ at 1% ***"
+        } else if self.statistic > cv5 {
+            "reject H₀ at 5% **"
+        } else if self.statistic > cv10 {
+            "reject H₀ at 10% *"
+        } else {
+            "fail to reject H₀ (evidence of stationarity)"
+        };
         println!("  Verdict: {sig}");
         println!();
     }
@@ -920,10 +1030,13 @@ pub fn kpss_test(y: &[f64], lags: usize, trend: bool) -> Result<KpssResult> {
     let mut lr_var = gamma0;
     for l in 1..=lags {
         let w = 1.0 - l as f64 / (lags + 1) as f64; // Bartlett weight
-        let gamma_l: f64 = resids.iter().skip(l)
+        let gamma_l: f64 = resids
+            .iter()
+            .skip(l)
             .zip(resids.iter())
             .map(|(a, b)| a * b)
-            .sum::<f64>() / n as f64;
+            .sum::<f64>()
+            / n as f64;
         lr_var += 2.0 * w * gamma_l;
     }
     let lr_var = lr_var.max(f64::EPSILON);
@@ -937,7 +1050,13 @@ pub fn kpss_test(y: &[f64], lags: usize, trend: bool) -> Result<KpssResult> {
         [0.347, 0.463, 0.739] // 10%, 5%, 1%
     };
 
-    Ok(KpssResult { statistic: stat, lags, n, critical_values: cv, trend })
+    Ok(KpssResult {
+        statistic: stat,
+        lags,
+        n,
+        critical_values: cv,
+        trend,
+    })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -947,7 +1066,10 @@ mod tests {
     use super::{acf, adf_test, kpss_test, ljung_box, pacf, Arima, AutoRegressive, Var};
 
     fn assert_close(a: f64, b: f64, tol: f64) {
-        assert!((a - b).abs() <= tol, "expected {b:.6} got {a:.6} (tol {tol})");
+        assert!(
+            (a - b).abs() <= tol,
+            "expected {b:.6} got {a:.6} (tol {tol})"
+        );
     }
 
     #[test]
@@ -970,8 +1092,10 @@ mod tests {
     #[test]
     fn arima_1_0_1_produces_valid_ma_coef() {
         // Simple MA(1) signal
-        let y = vec![0.5, 1.2, 0.8, 1.5, 1.1, 0.9, 1.3, 0.7, 1.4, 1.0,
-                     0.6, 1.6, 0.9, 1.2, 0.8, 1.1, 0.7, 1.3, 0.5, 1.4];
+        let y = vec![
+            0.5, 1.2, 0.8, 1.5, 1.1, 0.9, 1.3, 0.7, 1.4, 1.0, 0.6, 1.6, 0.9, 1.2, 0.8, 1.1, 0.7,
+            1.3, 0.5, 1.4,
+        ];
         let fit = Arima::new(1, 0, 1).fit(&y).unwrap();
         assert_eq!(fit.ar_coefficients.len(), 1);
         assert_eq!(fit.ma_coefficients.len(), 1);
@@ -1013,8 +1137,12 @@ mod tests {
         let y: Vec<f64> = (0..50).map(|i| (i as f64 * 0.3).sin()).collect();
         let res = adf_test(&y, 1).unwrap();
         // Stationary series → test stat should be strongly negative
-        assert!(res.statistic < res.critical_values[1], // 5% threshold
-            "ADF stat {:.3} should be below 5% cv {:.3}", res.statistic, res.critical_values[1]);
+        assert!(
+            res.statistic < res.critical_values[1], // 5% threshold
+            "ADF stat {:.3} should be below 5% cv {:.3}",
+            res.statistic,
+            res.critical_values[1]
+        );
     }
 
     #[test]
@@ -1022,7 +1150,1303 @@ mod tests {
         let y: Vec<f64> = (0..40).map(|i| (i as f64 * 0.3).sin()).collect();
         let res = kpss_test(&y, 3, false).unwrap();
         // Stationary series → KPSS stat should be small (fail to reject H₀)
-        assert!(res.statistic < res.critical_values[1], // below 5% cv
-            "KPSS stat {:.4} should be below 5% cv {:.3}", res.statistic, res.critical_values[1]);
+        assert!(
+            res.statistic < res.critical_values[1], // below 5% cv
+            "KPSS stat {:.4} should be below 5% cv {:.3}",
+            res.statistic,
+            res.critical_values[1]
+        );
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SARIMA / SARIMAX
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// SARIMA(p, d, q)(P, D, Q, s) — Seasonal AutoRegressive Integrated Moving Average.
+///
+/// Extends [`Arima`] with multiplicative seasonal AR and MA polynomials:
+///
+/// φ(B) Φ(Bˢ) ∇ᵈ ∇ₛᴰ yₜ = θ(B) Θ(Bˢ) εₜ
+///
+/// The seasonal and non-seasonal polynomials are **expanded** (multiplied out)
+/// into a flat lag array so the same CSS + Adam optimiser used by `Arima` can
+/// be applied without modification.
+///
+/// # Example
+/// ```rust
+/// use inferust::time_series::Sarima;
+///
+/// let y: Vec<f64> = (0..60).map(|i| {
+///     (i as f64) * 0.5 + 3.0 * ((i as f64 * std::f64::consts::PI * 2.0) / 12.0).sin()
+/// }).collect();
+/// let result = Sarima::new(1, 0, 1, 1, 1, 0, 12).fit(&y).unwrap();
+/// result.print_summary();
+/// ```
+#[derive(Debug, Clone)]
+pub struct Sarima {
+    /// Non-seasonal AR order.
+    pub p: usize,
+    /// Non-seasonal differencing order.
+    pub d: usize,
+    /// Non-seasonal MA order.
+    pub q: usize,
+    /// Seasonal AR order.
+    pub ps: usize,
+    /// Seasonal differencing order.
+    pub ds: usize,
+    /// Seasonal MA order.
+    pub qs: usize,
+    /// Seasonal period.
+    pub s: usize,
+    max_iter: usize,
+    tolerance: f64,
+}
+
+/// Fitted SARIMA(p,d,q)(P,D,Q,s) result.
+#[derive(Debug, Clone)]
+pub struct SarimaResult {
+    /// Non-seasonal AR coefficients φ₁ … φ_p.
+    pub ar_coefficients: Vec<f64>,
+    /// Non-seasonal MA coefficients θ₁ … θ_q.
+    pub ma_coefficients: Vec<f64>,
+    /// Seasonal AR coefficients Φ₁ … Φ_P.
+    pub seasonal_ar: Vec<f64>,
+    /// Seasonal MA coefficients Θ₁ … Θ_Q.
+    pub seasonal_ma: Vec<f64>,
+    /// Constant / intercept.
+    pub intercept: f64,
+    /// Residuals on the fully-differenced series.
+    pub residuals: Vec<f64>,
+    /// Fitted values on the fully-differenced series.
+    pub fitted_values: Vec<f64>,
+    /// Residual variance σ².
+    pub sigma2: f64,
+    /// Gaussian log-likelihood (CSS approximation).
+    pub log_likelihood: f64,
+    /// AIC.
+    pub aic: f64,
+    /// BIC.
+    pub bic: f64,
+    /// Number of effective observations.
+    pub n: usize,
+    // Internal tails for undifferencing.
+    original_tails: Vec<Vec<f64>>, // non-seasonal diff tails
+    seasonal_tails: Vec<Vec<f64>>, // seasonal diff tails
+    last_residuals: Vec<f64>,
+    s: usize,
+    d: usize,
+    ds: usize,
+}
+
+impl Sarima {
+    /// Create a SARIMA(p, d, q)(P, D, Q, s) builder.
+    pub fn new(p: usize, d: usize, q: usize, ps: usize, ds: usize, qs: usize, s: usize) -> Self {
+        Self {
+            p,
+            d,
+            q,
+            ps,
+            ds,
+            qs,
+            s,
+            max_iter: 3000,
+            tolerance: 1e-7,
+        }
+    }
+
+    /// Override the maximum optimiser iterations (default 3000).
+    pub fn max_iter(mut self, n: usize) -> Self {
+        self.max_iter = n;
+        self
+    }
+
+    /// Fit the model to `y`.
+    pub fn fit(&self, y: &[f64]) -> Result<SarimaResult> {
+        if self.s < 2 {
+            return Err(InferustError::InvalidInput(
+                "seasonal period s must be ≥ 2".into(),
+            ));
+        }
+        let min_len = self.ds * self.s
+            + self.d
+            + self
+                .p
+                .max(self.q)
+                .max(self.ps * self.s)
+                .max(self.qs * self.s)
+            + 2;
+        if y.len() < min_len {
+            return Err(InferustError::InsufficientData {
+                needed: min_len,
+                got: y.len(),
+            });
+        }
+
+        // ── Step 1: seasonal differencing ──────────────────────────────────
+        let mut seasonal_tails: Vec<Vec<f64>> = Vec::new();
+        let mut series = y.to_vec();
+        for _ in 0..self.ds {
+            seasonal_tails.push(series.clone());
+            let new: Vec<f64> = series[self.s..]
+                .iter()
+                .zip(series.iter())
+                .map(|(a, b)| a - b)
+                .collect();
+            series = new;
+        }
+
+        // ── Step 2: regular differencing ───────────────────────────────────
+        let mut original_tails: Vec<Vec<f64>> = Vec::new();
+        for _ in 0..self.d {
+            original_tails.push(series.clone());
+            series = series.windows(2).map(|w| w[1] - w[0]).collect();
+        }
+
+        // ── Step 3: expand multiplicative AR and MA polynomials ─────────────
+        // AR: φ(B)Φ(Bˢ) — parameters [φ₁..φ_p, Φ₁..Φ_P]
+        // MA: θ(B)Θ(Bˢ) — parameters [θ₁..θ_q, Θ₁..Θ_Q]
+        // The CSS residuals function uses the combined lag arrays.
+
+        let k = 1 + self.p + self.q + self.ps + self.qs;
+        let mut init = vec![0.0_f64; k];
+        init[0] = series.iter().sum::<f64>() / series.len().max(1) as f64;
+
+        // Initialise AR part from AR(p) OLS if possible
+        if self.p > 0 {
+            if let Ok(ar) = AutoRegressive::new(self.p).fit(&series) {
+                init[0] = ar.intercept;
+                for (i, &c) in ar.coefficients.iter().enumerate() {
+                    if 1 + i < k {
+                        init[1 + i] = c;
+                    }
+                }
+            }
+        }
+        // Small MA init
+        for i in 0..self.qs + self.q {
+            let idx = 1 + self.p + i;
+            if idx < k {
+                init[idx] = 0.01;
+            }
+        }
+
+        let p = self.p;
+        let q = self.q;
+        let ps = self.ps;
+        let qs = self.qs;
+        let s = self.s;
+        let params = sarima_css_optimize(
+            &series,
+            p,
+            q,
+            ps,
+            qs,
+            s,
+            &init,
+            self.max_iter,
+            self.tolerance,
+        );
+
+        let (fitted, resids) = sarima_css_fitted(&params, &series, p, q, ps, qs, s);
+        let n = fitted.len();
+        let sigma2 = if n > 1 {
+            resids.iter().map(|e| e * e).sum::<f64>() / (n - 1) as f64
+        } else {
+            resids.iter().map(|e| e * e).sum::<f64>()
+        };
+        let ll = gaussian_log_likelihood(&resids, sigma2);
+        let last_residuals = resids.clone();
+
+        Ok(SarimaResult {
+            intercept: params[0],
+            ar_coefficients: params[1..=p].to_vec(),
+            ma_coefficients: params[1 + p..1 + p + q].to_vec(),
+            seasonal_ar: params[1 + p + q..1 + p + q + ps].to_vec(),
+            seasonal_ma: params[1 + p + q + ps..].to_vec(),
+            residuals: resids,
+            fitted_values: fitted,
+            sigma2,
+            log_likelihood: ll,
+            aic: -2.0 * ll + 2.0 * k as f64,
+            bic: -2.0 * ll + k as f64 * (n as f64).ln(),
+            n,
+            original_tails,
+            seasonal_tails,
+            last_residuals,
+            s,
+            d: self.d,
+            ds: self.ds,
+        })
+    }
+}
+
+impl SarimaResult {
+    /// Print a compact SARIMA summary.
+    pub fn print_summary(&self) {
+        println!();
+        println!("═══════════════════════════════════════════════════════");
+        println!("  SARIMA Results");
+        println!("═══════════════════════════════════════════════════════");
+        println!("  n = {}   σ² = {:.6}", self.n, self.sigma2);
+        println!(
+            "  Log-lik = {:.4}   AIC = {:.4}   BIC = {:.4}",
+            self.log_likelihood, self.aic, self.bic
+        );
+        println!("─────────────────────────────────────────────────────");
+        println!("  const   = {:.6}", self.intercept);
+        for (i, &c) in self.ar_coefficients.iter().enumerate() {
+            println!("  ar.L{}   = {:.6}", i + 1, c);
+        }
+        for (i, &c) in self.ma_coefficients.iter().enumerate() {
+            println!("  ma.L{}   = {:.6}", i + 1, c);
+        }
+        for (i, &c) in self.seasonal_ar.iter().enumerate() {
+            println!("  ar.S{}   = {:.6}", i + 1, c);
+        }
+        for (i, &c) in self.seasonal_ma.iter().enumerate() {
+            println!("  ma.S{}   = {:.6}", i + 1, c);
+        }
+        println!("═══════════════════════════════════════════════════════");
+        println!();
+    }
+
+    /// Forecast `steps` ahead on the original (un-differenced) scale.
+    pub fn forecast(&self, history: &[f64], steps: usize) -> Result<Vec<f64>> {
+        if steps == 0 {
+            return Ok(vec![]);
+        }
+        let s = self.s;
+
+        // Apply seasonal differencing
+        let mut series = history.to_vec();
+        for _ in 0..self.ds {
+            if series.len() <= s {
+                return Err(InferustError::InsufficientData {
+                    needed: s + 1,
+                    got: series.len(),
+                });
+            }
+            series = series[s..]
+                .iter()
+                .zip(series.iter())
+                .map(|(a, b)| a - b)
+                .collect();
+        }
+        // Apply regular differencing
+        for _ in 0..self.d {
+            if series.len() < 2 {
+                return Err(InferustError::InsufficientData {
+                    needed: 2,
+                    got: series.len(),
+                });
+            }
+            series = series.windows(2).map(|w| w[1] - w[0]).collect();
+        }
+
+        let p = self.ar_coefficients.len();
+        let q = self.ma_coefficients.len();
+        let ps = self.seasonal_ar.len();
+        let qs = self.seasonal_ma.len();
+        let mut buf = series;
+        let mut eps_buf = vec![0.0_f64; buf.len()];
+        let copy_from = buf.len().saturating_sub(self.last_residuals.len());
+        for (i, &e) in self.last_residuals.iter().enumerate() {
+            let idx = copy_from + i;
+            if idx < eps_buf.len() {
+                eps_buf[idx] = e;
+            }
+        }
+
+        let mut diff_fcast = Vec::with_capacity(steps);
+        for step in 0..steps {
+            let t = buf.len();
+            let mut pred = self.intercept;
+            for i in 0..p {
+                if t > i {
+                    pred += self.ar_coefficients[i] * buf[t - 1 - i];
+                }
+            }
+            for j in 0..q {
+                if j + 1 > step {
+                    let lb = j - step;
+                    let lr = self.last_residuals.len();
+                    if lb < lr {
+                        pred += self.ma_coefficients[j] * self.last_residuals[lr - 1 - lb];
+                    }
+                }
+            }
+            for i in 0..ps {
+                let lag = (i + 1) * s;
+                if t >= lag {
+                    pred += self.seasonal_ar[i] * buf[t - lag];
+                }
+            }
+            // Seasonal MA: only in-sample residuals contribute
+            for j in 0..qs {
+                let lag = (j + 1) * s;
+                if lag > step {
+                    let lb = lag - step - 1;
+                    let lr = self.last_residuals.len();
+                    if lb < lr {
+                        pred += self.seasonal_ma[j] * self.last_residuals[lr - 1 - lb];
+                    }
+                }
+            }
+            buf.push(pred);
+            eps_buf.push(0.0);
+            diff_fcast.push(pred);
+        }
+
+        // Undifference: regular first
+        let mut fcast = diff_fcast;
+        for level in (0..self.d).rev() {
+            let seed = self.original_tails[level].last().copied().unwrap_or(0.0);
+            let mut prev = seed;
+            for f in fcast.iter_mut() {
+                prev += *f;
+                *f = prev;
+            }
+        }
+        // Undifference: seasonal
+        for level in (0..self.ds).rev() {
+            let tail = &self.seasonal_tails[level];
+            let tail_len = tail.len();
+            let mut extended = tail.clone();
+            extended.extend_from_slice(&fcast);
+            for i in 0..fcast.len() {
+                fcast[i] = extended[tail_len + i] + extended[tail_len + i - s];
+            }
+        }
+        Ok(fcast)
+    }
+}
+
+// ── SARIMA CSS internals ──────────────────────────────────────────────────────
+
+/// Compute SARIMA CSS residuals.
+/// params = [intercept, φ₁..φ_p, θ₁..θ_q, Φ₁..Φ_P, Θ₁..Θ_Q]
+fn sarima_css_residuals(
+    params: &[f64],
+    y: &[f64],
+    p: usize,
+    q: usize,
+    ps: usize,
+    qs: usize,
+    s: usize,
+) -> Vec<f64> {
+    let n = y.len();
+    let mut eps = vec![0.0_f64; n];
+    let start = p.max(ps * s);
+
+    for t in start..n {
+        let mut pred = params[0]; // intercept
+                                  // Non-seasonal AR
+        for i in 0..p {
+            if t >= i + 1 {
+                pred += params[1 + i] * y[t - 1 - i];
+            }
+        }
+        // Non-seasonal MA
+        for j in 0..q {
+            if t >= j + 1 {
+                pred += params[1 + p + j] * eps[t - 1 - j];
+            }
+        }
+        // Seasonal AR: Φ_I y_{t - I*s}
+        for i in 0..ps {
+            let lag = (i + 1) * s;
+            if t >= lag {
+                pred += params[1 + p + q + i] * y[t - lag];
+            }
+        }
+        // Seasonal MA: Θ_J ε_{t - J*s}
+        for j in 0..qs {
+            let lag = (j + 1) * s;
+            if t >= lag {
+                pred += params[1 + p + q + ps + j] * eps[t - lag];
+            }
+        }
+        // Cross terms: -φ_i Φ_I y_{t - i - I*s}
+        for i in 0..p {
+            for ii in 0..ps {
+                let lag = (i + 1) + (ii + 1) * s;
+                if t >= lag {
+                    pred -= params[1 + i] * params[1 + p + q + ii] * y[t - lag];
+                }
+            }
+        }
+        // Cross MA terms: -θ_j Θ_J ε_{t - j - J*s}
+        for j in 0..q {
+            for jj in 0..qs {
+                let lag = (j + 1) + (jj + 1) * s;
+                if t >= lag {
+                    pred -= params[1 + p + j] * params[1 + p + q + ps + jj] * eps[t - lag];
+                }
+            }
+        }
+        eps[t] = y[t] - pred;
+    }
+    eps[start..].to_vec()
+}
+
+fn sarima_css_objective(
+    params: &[f64],
+    y: &[f64],
+    p: usize,
+    q: usize,
+    ps: usize,
+    qs: usize,
+    s: usize,
+) -> f64 {
+    sarima_css_residuals(params, y, p, q, ps, qs, s)
+        .iter()
+        .map(|e| e * e)
+        .sum()
+}
+
+fn sarima_css_gradient(
+    params: &[f64],
+    y: &[f64],
+    p: usize,
+    q: usize,
+    ps: usize,
+    qs: usize,
+    s: usize,
+) -> Vec<f64> {
+    let h = 1e-5;
+    let f0 = sarima_css_objective(params, y, p, q, ps, qs, s);
+    let mut grad = vec![0.0_f64; params.len()];
+    let mut ph = params.to_vec();
+    for i in 0..params.len() {
+        ph[i] += h;
+        grad[i] = (sarima_css_objective(&ph, y, p, q, ps, qs, s) - f0) / h;
+        ph[i] = params[i];
+    }
+    grad
+}
+
+fn sarima_css_optimize(
+    y: &[f64],
+    p: usize,
+    q: usize,
+    ps: usize,
+    qs: usize,
+    s: usize,
+    init: &[f64],
+    max_iter: usize,
+    tol: f64,
+) -> Vec<f64> {
+    let mut params = init.to_vec();
+    let np = params.len();
+    let (alpha, beta1, beta2, eps) = (0.05_f64, 0.9_f64, 0.999_f64, 1e-8_f64);
+    let mut m = vec![0.0_f64; np];
+    let mut v = vec![0.0_f64; np];
+    for iter in 1..=max_iter {
+        let grad = sarima_css_gradient(&params, y, p, q, ps, qs, s);
+        let gnorm: f64 = grad.iter().map(|g| g * g).sum::<f64>().sqrt();
+        if gnorm < tol {
+            break;
+        }
+        let t = iter as f64;
+        for i in 0..np {
+            m[i] = beta1 * m[i] + (1.0 - beta1) * grad[i];
+            v[i] = beta2 * v[i] + (1.0 - beta2) * grad[i] * grad[i];
+            let m_hat = m[i] / (1.0 - beta1.powf(t));
+            let v_hat = v[i] / (1.0 - beta2.powf(t));
+            params[i] -= alpha * m_hat / (v_hat.sqrt() + eps);
+        }
+    }
+    params
+}
+
+fn sarima_css_fitted(
+    params: &[f64],
+    y: &[f64],
+    p: usize,
+    q: usize,
+    ps: usize,
+    qs: usize,
+    s: usize,
+) -> (Vec<f64>, Vec<f64>) {
+    let n = y.len();
+    let start = p.max(ps * s);
+    let mut eps = vec![0.0_f64; n];
+    let mut fitted = Vec::with_capacity(n - start);
+    for t in start..n {
+        let mut pred = params[0];
+        for i in 0..p {
+            if t >= i + 1 {
+                pred += params[1 + i] * y[t - 1 - i];
+            }
+        }
+        for j in 0..q {
+            if t >= j + 1 {
+                pred += params[1 + p + j] * eps[t - 1 - j];
+            }
+        }
+        for i in 0..ps {
+            let lag = (i + 1) * s;
+            if t >= lag {
+                pred += params[1 + p + q + i] * y[t - lag];
+            }
+        }
+        for j in 0..qs {
+            let lag = (j + 1) * s;
+            if t >= lag {
+                pred += params[1 + p + q + ps + j] * eps[t - lag];
+            }
+        }
+        for i in 0..p {
+            for ii in 0..ps {
+                let lag = (i + 1) + (ii + 1) * s;
+                if t >= lag {
+                    pred -= params[1 + i] * params[1 + p + q + ii] * y[t - lag];
+                }
+            }
+        }
+        for j in 0..q {
+            for jj in 0..qs {
+                let lag = (j + 1) + (jj + 1) * s;
+                if t >= lag {
+                    pred -= params[1 + p + j] * params[1 + p + q + ps + jj] * eps[t - lag];
+                }
+            }
+        }
+        eps[t] = y[t] - pred;
+        fitted.push(pred);
+    }
+    (fitted, eps[start..].to_vec())
+}
+
+// ── SARIMAX ───────────────────────────────────────────────────────────────────
+
+/// SARIMAX — SARIMA with exogenous regressors.
+///
+/// Exogenous variables are projected out by OLS before the SARIMA model is
+/// fitted on the residuals.  Forecasting requires the exogenous values for
+/// future periods to be supplied alongside the history.
+///
+/// # Example
+/// ```rust
+/// use inferust::time_series::Sarimax;
+///
+/// let y: Vec<f64> = (0..48).map(|i| i as f64 + ((i as f64 / 12.0) * std::f64::consts::TAU).sin()).collect();
+/// let x: Vec<Vec<f64>> = (0..48).map(|i| vec![(i % 2) as f64]).collect();
+/// let res = Sarimax::new(1, 0, 1, 1, 1, 0, 12).fit(&y, &x).unwrap();
+/// res.sarima.print_summary();
+/// ```
+#[derive(Debug, Clone)]
+pub struct Sarimax {
+    inner: Sarima,
+}
+
+/// Fitted SARIMAX result.
+#[derive(Debug, Clone)]
+pub struct SarimaxResult {
+    /// Coefficients for the exogenous variables.
+    pub exog_coefficients: Vec<f64>,
+    /// Exogenous variable names.
+    pub exog_names: Vec<String>,
+    /// SARIMA result fitted on the exog-adjusted residuals.
+    pub sarima: SarimaResult,
+}
+
+impl Sarimax {
+    /// Create a SARIMAX builder with the same orders as [`Sarima::new`].
+    pub fn new(p: usize, d: usize, q: usize, ps: usize, ds: usize, qs: usize, s: usize) -> Self {
+        Self {
+            inner: Sarima::new(p, d, q, ps, ds, qs, s),
+        }
+    }
+
+    /// Override max optimiser iterations.
+    pub fn max_iter(mut self, n: usize) -> Self {
+        self.inner = self.inner.max_iter(n);
+        self
+    }
+
+    /// Fit SARIMAX.
+    ///
+    /// * `y`  — response series (length n).
+    /// * `x`  — exogenous regressors (n rows × k cols).
+    pub fn fit(&self, y: &[f64], x: &[Vec<f64>]) -> Result<SarimaxResult> {
+        let n = y.len();
+        if x.len() != n {
+            return Err(InferustError::DimensionMismatch {
+                x_rows: x.len(),
+                y_len: n,
+            });
+        }
+        let k = x[0].len();
+
+        // OLS-project out exogenous variables
+        let x_mat = DMatrix::from_fn(
+            n,
+            k + 1,
+            |row, col| {
+                if col == 0 {
+                    1.0
+                } else {
+                    x[row][col - 1]
+                }
+            },
+        );
+        let y_vec = DVector::from_column_slice(y);
+        let xtx = x_mat.transpose() * &x_mat;
+        let xty = x_mat.transpose() * &y_vec;
+        let xtx_inv = regularized_inverse(&xtx)?;
+        let beta_exog = &xtx_inv * &xty;
+        let exog_coefficients: Vec<f64> = beta_exog.iter().copied().collect();
+
+        let fitted_exog: Vec<f64> = (0..n)
+            .map(|i| row_dot_matrix(&x_mat, i, &beta_exog))
+            .collect();
+        let y_adj: Vec<f64> = y
+            .iter()
+            .zip(fitted_exog.iter())
+            .map(|(yi, fi)| yi - fi)
+            .collect();
+
+        let sarima_result = self.inner.fit(&y_adj)?;
+        let exog_names: Vec<String> = std::iter::once("const".to_string())
+            .chain((1..=k).map(|i| format!("exog{i}")))
+            .collect();
+
+        Ok(SarimaxResult {
+            exog_coefficients,
+            exog_names,
+            sarima: sarima_result,
+        })
+    }
+}
+
+impl SarimaxResult {
+    /// Print a summary including exogenous coefficients and the SARIMA part.
+    pub fn print_summary(&self) {
+        println!("── SARIMAX exogenous coefficients ──────────────────────");
+        for (name, coef) in self.exog_names.iter().zip(self.exog_coefficients.iter()) {
+            println!("  {:<18} = {:.6}", name, coef);
+        }
+        self.sarima.print_summary();
+    }
+}
+
+// ── SARIMA tests ──────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod sarima_tests {
+    use super::{Sarima, Sarimax};
+
+    #[test]
+    fn sarima_1_0_1_1_0_0_12_fits() {
+        let y: Vec<f64> = (0..60)
+            .map(|i| {
+                (i as f64) * 0.3 + 2.0 * ((i as f64 * std::f64::consts::PI * 2.0) / 12.0).sin()
+            })
+            .collect();
+        let res = Sarima::new(1, 0, 1, 1, 0, 0, 12).fit(&y).unwrap();
+        assert_eq!(res.ar_coefficients.len(), 1);
+        assert_eq!(res.seasonal_ar.len(), 1);
+        assert!(res.sigma2 > 0.0);
+    }
+
+    #[test]
+    fn sarima_forecast_length() {
+        let y: Vec<f64> = (0..48)
+            .map(|i| i as f64 + ((i as f64 / 12.0) * std::f64::consts::TAU).sin())
+            .collect();
+        let res = Sarima::new(1, 1, 0, 0, 1, 0, 12).fit(&y).unwrap();
+        let fcast = res.forecast(&y, 6).unwrap();
+        assert_eq!(fcast.len(), 6);
+    }
+
+    #[test]
+    fn sarimax_fits_with_exog() {
+        let y: Vec<f64> = (0..48)
+            .map(|i| i as f64 + ((i as f64 / 12.0) * std::f64::consts::TAU).sin())
+            .collect();
+        let x: Vec<Vec<f64>> = (0..48).map(|i| vec![(i % 2) as f64]).collect();
+        let res = Sarimax::new(1, 0, 0, 0, 1, 0, 12).fit(&y, &x).unwrap();
+        assert_eq!(res.exog_coefficients.len(), 2); // const + 1 exog
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// VECM / VARMAX
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// VECM — Vector Error Correction Model (Johansen reduced-rank regression).
+///
+/// For k cointegrated I(1) series the VECM representation is:
+///
+/// ΔYₜ = Π Yₜ₋₁ + Σ Γᵢ ΔYₜ₋ᵢ + εₜ
+///
+/// where Π = αβ′ has reduced rank r (the **cointegration rank**).
+/// β is the cointegrating vector matrix, α is the adjustment speed matrix.
+///
+/// Identification follows Johansen's reduced-rank regression approach:
+/// eigenvalues of S₁₁⁻¹ S₁₀ S₀₀⁻¹ S₀₁ give the squared canonical correlations
+/// between ΔY and Yₜ₋₁ after conditioning on lagged ΔY.
+///
+/// # Example
+/// ```rust
+/// use inferust::time_series::Vecm;
+///
+/// // Two I(1) series with a cointegrating relationship
+/// let y1: Vec<f64> = (0..50).map(|i| i as f64 + (i as f64 * 0.1).sin()).collect();
+/// let y2: Vec<f64> = (0..50).map(|i| i as f64 * 1.5 + 1.0 + (i as f64 * 0.1).cos()).collect();
+/// let res = Vecm::new(1, 1).fit(&[y1, y2]).unwrap();
+/// res.print_summary();
+/// ```
+#[derive(Debug, Clone)]
+pub struct Vecm {
+    /// Number of lagged differences to include (VECM order p−1).
+    pub lags: usize,
+    /// Cointegration rank r.
+    pub rank: usize,
+}
+
+/// Fitted VECM result.
+#[derive(Debug, Clone)]
+pub struct VecmResult {
+    /// Johansen eigenvalues (ordered largest first), length k.
+    pub eigenvalues: Vec<f64>,
+    /// Cointegrating vectors β: each column is one cointegrating vector (k × r).
+    pub beta: Vec<Vec<f64>>,
+    /// Adjustment coefficients α (k × r).
+    pub alpha: Vec<Vec<f64>>,
+    /// Short-run coefficient matrices Γ₁ … Γ_{lags} (each k×k, stored row-major).
+    pub gamma: Vec<Vec<Vec<f64>>>,
+    /// Trace test statistics for H₀: rank ≤ r.
+    pub trace_statistics: Vec<f64>,
+    /// Number of variables k.
+    pub k: usize,
+    /// Cointegration rank r.
+    pub rank: usize,
+    /// Effective observations used.
+    pub n: usize,
+}
+
+impl Vecm {
+    /// Create a VECM builder.
+    ///
+    /// * `lags` — number of lagged ΔY terms (0 = no short-run dynamics).
+    /// * `rank` — assumed cointegration rank r (must satisfy 0 < r < k).
+    pub fn new(lags: usize, rank: usize) -> Self {
+        Self { lags, rank }
+    }
+
+    /// Fit the VECM.
+    ///
+    /// `series` is a slice of k variable vectors, each of length T.
+    pub fn fit(&self, series: &[Vec<f64>]) -> Result<VecmResult> {
+        let k = series.len();
+        if k < 2 {
+            return Err(InferustError::InvalidInput(
+                "VECM requires at least 2 series".into(),
+            ));
+        }
+        if self.rank == 0 || self.rank >= k {
+            return Err(InferustError::InvalidInput(format!(
+                "rank must satisfy 0 < rank < k (k = {k})"
+            )));
+        }
+        let t = series[0].len();
+        for s in series.iter() {
+            if s.len() != t {
+                return Err(InferustError::DimensionMismatch {
+                    x_rows: s.len(),
+                    y_len: t,
+                });
+            }
+        }
+        let p = self.lags;
+        let n = t - p - 1; // effective obs
+        if n < k + 1 {
+            return Err(InferustError::InsufficientData {
+                needed: k + p + 2,
+                got: t,
+            });
+        }
+
+        // Build ΔY matrix (t-1 rows × k cols)
+        let dy: Vec<Vec<f64>> = (0..t - 1)
+            .map(|i| (0..k).map(|v| series[v][i + 1] - series[v][i]).collect())
+            .collect();
+
+        // R₀ₜ = residuals of ΔYₜ on lagged ΔY  (n × k)
+        // R₁ₜ = residuals of Yₜ₋₁ on lagged ΔY (n × k)
+        let (r0, r1) = johansen_residuals(&dy, series, p, n, k, t);
+
+        // Moment matrices
+        let s00 = moment_matrix(&r0, n, k);
+        let s11 = moment_matrix(&r1, n, k);
+        let s01 = cross_moment(&r0, &r1, n, k);
+        let s10 = cross_moment(&r1, &r0, n, k);
+
+        // Solve generalised eigenvalue problem: λ S₁₁ v = S₁₀ S₀₀⁻¹ S₀₁ v
+        // Transform to standard symmetric EVP:
+        // M = S₁₁⁻¹/² S₁₀ S₀₀⁻¹ S₀₁ S₁₁⁻¹/²
+        let s11_mat = DMatrix::from_fn(k, k, |r, c| s11[r][c]);
+        let s00_mat = DMatrix::from_fn(k, k, |r, c| s00[r][c]);
+        let s01_mat = DMatrix::from_fn(k, k, |r, c| s01[r][c]);
+        let s10_mat = DMatrix::from_fn(k, k, |r, c| s10[r][c]);
+
+        let s11_inv = regularized_inverse(&s11_mat).map_err(|_| {
+            InferustError::InvalidInput(
+                "S11 is singular - possible perfect multicollinearity".into(),
+            )
+        })?;
+        let s00_inv = regularized_inverse(&s00_mat)
+            .map_err(|_| InferustError::InvalidInput("S00 is singular".into()))?;
+
+        // M = S₁₁⁻¹ S₁₀ S₀₀⁻¹ S₀₁  (not symmetric but eigenvalues are real)
+        let m = &s11_inv * &s10_mat * &s00_inv * &s01_mat;
+
+        // Symmetrise: M_sym = (M + M')/2 for SymmetricEigen
+        let m_sym = (&m + m.transpose()) * 0.5;
+        let eig = nalgebra::linalg::SymmetricEigen::new(m_sym);
+        let mut eig_pairs: Vec<(f64, Vec<f64>)> = eig
+            .eigenvalues
+            .iter()
+            .copied()
+            .zip(
+                eig.eigenvectors
+                    .column_iter()
+                    .map(|c| c.iter().copied().collect::<Vec<_>>()),
+            )
+            .collect();
+        eig_pairs.sort_by(|(a, _), (b, _)| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+
+        let eigenvalues: Vec<f64> = eig_pairs.iter().map(|(e, _)| e.abs()).collect();
+
+        // Cointegrating vectors β = first r eigenvectors (columns)
+        let r = self.rank;
+        let beta: Vec<Vec<f64>> = (0..r).map(|i| eig_pairs[i].1.clone()).collect();
+
+        // α = S₀₁ β (S₁₁⁻¹ β)... simplified: α = S₀₁ β
+        let beta_mat = DMatrix::from_fn(k, r, |row, col| beta[col][row]);
+        let alpha_mat = &s01_mat * &beta_mat;
+        let alpha: Vec<Vec<f64>> = (0..k)
+            .map(|i| (0..r).map(|j| alpha_mat[(i, j)]).collect())
+            .collect();
+
+        // Short-run Γ matrices from OLS on the partitioned regression
+        let gamma = estimate_gamma(&dy, series, p, n, k, t);
+
+        // Trace test statistics: T Σ ln(1 - λᵢ) for i=r+1..k-1
+        let trace_statistics: Vec<f64> = (0..k)
+            .map(|r0| {
+                -(n as f64)
+                    * eigenvalues[r0..]
+                        .iter()
+                        .map(|&lam| (1.0_f64 - lam.clamp(0.0, 0.9999)).ln())
+                        .sum::<f64>()
+            })
+            .collect();
+
+        Ok(VecmResult {
+            eigenvalues,
+            beta,
+            alpha,
+            gamma,
+            trace_statistics,
+            k,
+            rank: r,
+            n,
+        })
+    }
+}
+
+impl VecmResult {
+    /// Print VECM summary: eigenvalues, trace statistics, and cointegrating vectors.
+    pub fn print_summary(&self) {
+        println!();
+        println!("══════════════════════════════════════════════════════════");
+        println!(
+            "  VECM (Johansen)   k = {}   rank = {}   n = {}",
+            self.k, self.rank, self.n
+        );
+        println!("══════════════════════════════════════════════════════════");
+        println!("  Eigenvalues:");
+        for (i, &lam) in self.eigenvalues.iter().enumerate() {
+            println!(
+                "    λ_{} = {:.6}   trace stat = {:.4}",
+                i + 1,
+                lam,
+                self.trace_statistics[i]
+            );
+        }
+        println!("──────────────────────────────────────────────────────────");
+        println!("  Cointegrating vectors β (columns):");
+        for i in 0..self.k {
+            let row: Vec<String> = (0..self.rank)
+                .map(|j| format!("{:>10.4}", self.beta[j][i]))
+                .collect();
+            println!("    y{}  {}", i + 1, row.join("  "));
+        }
+        println!("══════════════════════════════════════════════════════════");
+        println!();
+    }
+}
+
+// ── Johansen helpers ──────────────────────────────────────────────────────────
+
+fn johansen_residuals(
+    dy: &[Vec<f64>],
+    series: &[Vec<f64>],
+    p: usize,
+    n: usize,
+    k: usize,
+    t: usize,
+) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
+    // Build lagged ΔY regressor matrix (n × k*p)
+    let lag_cols = k * p;
+    if lag_cols == 0 {
+        // No short-run terms: residuals = raw ΔYₜ and Yₜ₋₁
+        let r0: Vec<Vec<f64>> = (p + 1..t).map(|t_idx| dy[t_idx - 1].clone()).collect();
+        let r1: Vec<Vec<f64>> = (p + 1..t)
+            .map(|t_idx| (0..k).map(|v| series[v][t_idx - 1]).collect())
+            .collect();
+        return (r0, r1);
+    }
+
+    let z_mat = DMatrix::from_fn(n, lag_cols, |row, col| {
+        let t_idx = row + p + 1; // observation index
+        let lag = col / k + 1;
+        let var = col % k;
+        dy[t_idx - 1 - lag][var]
+    });
+
+    let ztzt = &z_mat.transpose() * &z_mat;
+    let ztzt_inv = match regularized_inverse(&ztzt) {
+        Ok(inv) => inv,
+        Err(_) => {
+            // Fallback: return raw series
+            let r0: Vec<Vec<f64>> = (p + 1..t).map(|t_idx| dy[t_idx - 1].clone()).collect();
+            let r1: Vec<Vec<f64>> = (p + 1..t)
+                .map(|t_idx| (0..k).map(|v| series[v][t_idx - 1]).collect())
+                .collect();
+            return (r0, r1);
+        }
+    };
+
+    // Residualise ΔYₜ on lagged ΔY
+    let dy0_mat = DMatrix::from_fn(n, k, |row, col| dy[row + p][col]);
+    let coef0 = &ztzt_inv * z_mat.transpose() * &dy0_mat;
+    let r0_mat = &dy0_mat - &z_mat * &coef0;
+
+    // Residualise Yₜ₋₁ on lagged ΔY
+    let y1_mat = DMatrix::from_fn(n, k, |row, col| series[col][row + p]);
+    let coef1 = &ztzt_inv * z_mat.transpose() * &y1_mat;
+    let r1_mat = &y1_mat - &z_mat * &coef1;
+
+    let r0: Vec<Vec<f64>> = (0..n)
+        .map(|i| (0..k).map(|j| r0_mat[(i, j)]).collect())
+        .collect();
+    let r1: Vec<Vec<f64>> = (0..n)
+        .map(|i| (0..k).map(|j| r1_mat[(i, j)]).collect())
+        .collect();
+    (r0, r1)
+}
+
+fn moment_matrix(r: &[Vec<f64>], n: usize, k: usize) -> Vec<Vec<f64>> {
+    let mut s = vec![vec![0.0f64; k]; k];
+    for row in r.iter() {
+        for i in 0..k {
+            for j in 0..k {
+                s[i][j] += row[i] * row[j];
+            }
+        }
+    }
+    for i in 0..k {
+        for j in 0..k {
+            s[i][j] /= n as f64;
+        }
+    }
+    s
+}
+
+fn cross_moment(r0: &[Vec<f64>], r1: &[Vec<f64>], n: usize, k: usize) -> Vec<Vec<f64>> {
+    let mut s = vec![vec![0.0f64; k]; k];
+    for (a, b) in r0.iter().zip(r1.iter()) {
+        for i in 0..k {
+            for j in 0..k {
+                s[i][j] += a[i] * b[j];
+            }
+        }
+    }
+    for i in 0..k {
+        for j in 0..k {
+            s[i][j] /= n as f64;
+        }
+    }
+    s
+}
+
+fn estimate_gamma(
+    dy: &[Vec<f64>],
+    _series: &[Vec<f64>],
+    p: usize,
+    n: usize,
+    k: usize,
+    _t: usize,
+) -> Vec<Vec<Vec<f64>>> {
+    if p == 0 {
+        return Vec::new();
+    }
+    // Simple OLS of ΔYₜ on ΔYₜ₋₁..ΔYₜ₋ₚ for each equation
+    let x_cols = k * p;
+    let x_mat = DMatrix::from_fn(n, x_cols, |row, col| {
+        let t_idx = row + p + 1;
+        let lag = col / k + 1;
+        let var = col % k;
+        dy[t_idx - 1 - lag][var]
+    });
+    let xtx = x_mat.transpose() * &x_mat;
+    let xtx_inv = match regularized_inverse(&xtx) {
+        Ok(inv) => inv,
+        Err(_) => return vec![vec![vec![0.0; k]; k]; p],
+    };
+    let mut gammas = vec![vec![vec![0.0f64; k]; k]; p];
+    for eq in 0..k {
+        let y_eq = DVector::from_fn(n, |row, _| dy[row + p][eq]);
+        let coef = &xtx_inv * (x_mat.transpose() * &y_eq);
+        for lag in 0..p {
+            for var in 0..k {
+                gammas[lag][eq][var] = coef[lag * k + var];
+            }
+        }
+    }
+    gammas
+}
+
+// ── VARMAX ────────────────────────────────────────────────────────────────────
+
+/// VARMAX — VAR with exogenous (X) variables.
+///
+/// Adds k_x exogenous columns to each VAR equation.  Otherwise identical to [`Var`].
+///
+/// # Example
+/// ```rust
+/// use inferust::time_series::Varmax;
+///
+/// let y1: Vec<f64> = (0..30).map(|i| i as f64).collect();
+/// let y2: Vec<f64> = (0..30).map(|i| i as f64 * 0.5 + 1.0).collect();
+/// let x: Vec<Vec<f64>> = (0..30).map(|i| vec![(i % 4) as f64]).collect();
+/// let res = Varmax::new(1).fit(&[y1, y2], &x).unwrap();
+/// ```
+#[derive(Debug, Clone)]
+pub struct Varmax {
+    lags: usize,
+}
+
+/// Fitted VARMAX result.
+#[derive(Debug, Clone)]
+pub struct VarmaxResult {
+    /// VAR coefficients per equation including exogenous: `[intercept, y1_{t-1}, ..., x1_t, ...]`.
+    pub coefficients: Vec<Vec<f64>>,
+    /// Residuals per variable.
+    pub residuals: Vec<Vec<f64>>,
+    /// Number of endogenous variables.
+    pub k: usize,
+    /// Number of exogenous variables.
+    pub k_x: usize,
+    /// Lag order.
+    pub lags: usize,
+    /// Effective observations.
+    pub n: usize,
+    /// Joint AIC.
+    pub aic: f64,
+    /// Joint BIC.
+    pub bic: f64,
+}
+
+impl Varmax {
+    /// Create a VARMAX(p) builder.
+    pub fn new(lags: usize) -> Self {
+        Self { lags }
+    }
+
+    /// Fit VARMAX.
+    ///
+    /// * `series` — slice of k endogenous variable vectors.
+    /// * `exog`   — exogenous regressor matrix (T rows × k_x cols); same length as each series.
+    pub fn fit(&self, series: &[Vec<f64>], exog: &[Vec<f64>]) -> Result<VarmaxResult> {
+        let k = series.len();
+        if k < 1 {
+            return Err(InferustError::InvalidInput(
+                "VARMAX requires at least 1 endogenous variable".into(),
+            ));
+        }
+        let t = series[0].len();
+        for s in series.iter() {
+            if s.len() != t {
+                return Err(InferustError::DimensionMismatch {
+                    x_rows: s.len(),
+                    y_len: t,
+                });
+            }
+        }
+        if exog.len() != t {
+            return Err(InferustError::DimensionMismatch {
+                x_rows: exog.len(),
+                y_len: t,
+            });
+        }
+        let k_x = exog[0].len();
+        let n = t - self.lags;
+        if n < 2 {
+            return Err(InferustError::InsufficientData {
+                needed: self.lags + 2,
+                got: t,
+            });
+        }
+
+        // Build regressor matrix: [const, y_{t-1}..y_{t-p}, x_t] for each t >= lags
+        let reg_cols = k * self.lags + k_x;
+        let x_cols = reg_cols + 1;
+        let x_mat = DMatrix::from_fn(n, x_cols, |row, col| {
+            let t_idx = row + self.lags;
+            if col == 0 {
+                1.0
+            } else if col - 1 < k * self.lags {
+                let lag = (col - 1) / k + 1;
+                let var = (col - 1) % k;
+                series[var][t_idx - lag]
+            } else {
+                let exog_col = col - 1 - k * self.lags;
+                exog[t_idx][exog_col]
+            }
+        });
+
+        let xtx = x_mat.transpose() * &x_mat;
+        let xtx_inv = regularized_inverse(&xtx)?;
+
+        let mut coefficients = Vec::with_capacity(k);
+        let mut residuals_all = Vec::with_capacity(k);
+        let mut total_ll = 0.0_f64;
+        let total_params = k * x_cols;
+
+        for var in series.iter() {
+            let y_eq = DVector::from_fn(n, |row, _| var[row + self.lags]);
+            let beta = &xtx_inv * (x_mat.transpose() * &y_eq);
+            let fitted: DVector<f64> = &x_mat * &beta;
+            let resids: Vec<f64> = y_eq.iter().zip(fitted.iter()).map(|(a, b)| a - b).collect();
+            let sigma2 = resids.iter().map(|e| e * e).sum::<f64>() / n.max(1) as f64;
+            total_ll += gaussian_log_likelihood(&resids, sigma2);
+            coefficients.push(beta.iter().copied().collect());
+            residuals_all.push(resids);
+        }
+
+        let aic = -2.0 * total_ll + 2.0 * total_params as f64;
+        let bic = -2.0 * total_ll + total_params as f64 * (n as f64).ln();
+
+        Ok(VarmaxResult {
+            coefficients,
+            residuals: residuals_all,
+            k,
+            k_x,
+            lags: self.lags,
+            n,
+            aic,
+            bic,
+        })
+    }
+}
+
+impl VarmaxResult {
+    /// Forecast `steps` ahead given endogenous history and future exogenous values.
+    ///
+    /// `exog_future` must have exactly `steps` rows.
+    pub fn forecast(
+        &self,
+        history: &[Vec<f64>],
+        exog_future: &[Vec<f64>],
+    ) -> Result<Vec<Vec<f64>>> {
+        let steps = exog_future.len();
+        if steps == 0 {
+            return Ok(vec![vec![]; self.k]);
+        }
+        if history.len() != self.k {
+            return Err(InferustError::DimensionMismatch {
+                x_rows: history.len(),
+                y_len: self.k,
+            });
+        }
+        let mut bufs: Vec<Vec<f64>> = history.to_vec();
+        let mut out: Vec<Vec<f64>> = vec![Vec::with_capacity(steps); self.k];
+
+        for step in 0..steps {
+            let t = bufs[0].len();
+            let mut row = Vec::with_capacity(self.k * self.lags + self.k_x + 1);
+            row.push(1.0);
+            for lag in 1..=self.lags {
+                for buf in bufs.iter() {
+                    row.push(if t >= lag { buf[t - lag] } else { 0.0 });
+                }
+            }
+            for &xval in exog_future[step].iter() {
+                row.push(xval);
+            }
+            for (i, coefs) in self.coefficients.iter().enumerate() {
+                let mut pred = 0.0;
+                for (j, &c) in coefs.iter().enumerate() {
+                    if j < row.len() {
+                        pred += c * row[j];
+                    }
+                }
+                bufs[i].push(pred);
+                out[i].push(pred);
+            }
+        }
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod vecm_varmax_tests {
+    use super::{Varmax, Vecm};
+
+    #[test]
+    fn vecm_fits_cointegrated_series() {
+        let y1: Vec<f64> = (0..50).map(|i| i as f64 + (i as f64 * 0.1).sin()).collect();
+        let y2: Vec<f64> = (0..50)
+            .map(|i| i as f64 * 1.5 + 1.0 + (i as f64 * 0.1).cos())
+            .collect();
+        let res = Vecm::new(1, 1).fit(&[y1, y2]).unwrap();
+        assert_eq!(res.k, 2);
+        assert_eq!(res.rank, 1);
+        assert_eq!(res.beta.len(), 1); // 1 cointegrating vector
+        assert_eq!(res.eigenvalues.len(), 2);
+    }
+
+    #[test]
+    fn vecm_trace_statistics_non_negative() {
+        let y1: Vec<f64> = (0..40).map(|i| i as f64).collect();
+        let y2: Vec<f64> = (0..40).map(|i| 2.0 * i as f64 + 1.0).collect();
+        let res = Vecm::new(0, 1).fit(&[y1, y2]).unwrap();
+        for &ts in &res.trace_statistics {
+            assert!(ts >= 0.0, "trace stat = {ts:.4}");
+        }
+    }
+
+    #[test]
+    fn varmax_fits_with_exog() {
+        let y1: Vec<f64> = (0..25).map(|i| i as f64).collect();
+        let y2: Vec<f64> = (0..25).map(|i| i as f64 * 0.5 + 1.0).collect();
+        let x: Vec<Vec<f64>> = (0..25).map(|i| vec![(i % 3) as f64]).collect();
+        let res = Varmax::new(1).fit(&[y1.clone(), y2.clone()], &x).unwrap();
+        assert_eq!(res.k, 2);
+        assert_eq!(res.k_x, 1);
+        let fcast = res
+            .forecast(
+                &[y1, y2],
+                &(0..3).map(|i| vec![(i % 3) as f64]).collect::<Vec<_>>(),
+            )
+            .unwrap();
+        assert_eq!(fcast.len(), 2);
+        assert_eq!(fcast[0].len(), 3);
     }
 }

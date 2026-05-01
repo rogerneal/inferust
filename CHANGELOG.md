@@ -4,6 +4,17 @@ All notable changes to `inferust` are documented here. This project follows sema
 
 ## [Unreleased]
 
+### Added
+
+- Exposed `regression::Gls` / `Fgls` and `RollingOls` / `RecursiveOls` from the public regression module.
+- Added seasonal time-series starters: `Sarima`, `Sarimax`, `Vecm`, and `Varmax`, with forecasts and summary helpers where applicable.
+- Added `graphics` SVG plotting helpers for line, scatter, residual, and ACF plots.
+
+### Fixed
+
+- Hardened GLS/SARIMAX fitted-value calculations against nalgebra row/vector shape panics.
+- Added regularized matrix-inverse fallbacks for collinear starter VAR/VECM/VARMAX examples.
+
 ## [0.1.7] - 2026-05-01
 
 ### Added
