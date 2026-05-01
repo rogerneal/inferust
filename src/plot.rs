@@ -224,11 +224,11 @@ impl Plot {
             let yv = ymin + yrange * i as f64 / n_yticks as f64;
             let yp = sy(yv);
             let _ = write!(svg,
-                r#"<line x1="{ml:.1}" y1="{yp:.1}" x2="{:.1}" y2="{yp:.1}" stroke="#e0e0e0" stroke-width="0.5"/>"#,
+                r##"<line x1="{ml:.1}" y1="{yp:.1}" x2="{:.1}" y2="{yp:.1}" stroke="#e0e0e0" stroke-width="0.5"/>"##,
                 ml + pw
             );
             let _ = write!(svg,
-                r#"<text x="{:.1}" y="{:.1}" text-anchor="end" font-size="11" fill="#666">{:.2}</text>"#,
+                r##"<text x="{:.1}" y="{:.1}" text-anchor="end" font-size="11" fill="#666">{:.2}</text>"##,
                 ml - 4.0, yp + 4.0, yv
             );
         }
@@ -237,18 +237,18 @@ impl Plot {
             let xv = xmin + xrange * i as f64 / n_xticks as f64;
             let xp = sx(xv);
             let _ = write!(svg,
-                r#"<line x1="{xp:.1}" y1="{mt:.1}" x2="{xp:.1}" y2="{:.1}" stroke="#e0e0e0" stroke-width="0.5"/>"#,
+                r##"<line x1="{xp:.1}" y1="{mt:.1}" x2="{xp:.1}" y2="{:.1}" stroke="#e0e0e0" stroke-width="0.5"/>"##,
                 mt + ph
             );
             let _ = write!(svg,
-                r#"<text x="{xp:.1}" y="{:.1}" text-anchor="middle" font-size="11" fill="#666">{:.2}</text>"#,
+                r##"<text x="{xp:.1}" y="{:.1}" text-anchor="middle" font-size="11" fill="#666">{:.2}</text>"##,
                 mt + ph + 14.0, xv
             );
         }
 
         // Plot border
         let _ = write!(svg,
-            r#"<rect x="{ml:.1}" y="{mt:.1}" width="{pw:.1}" height="{ph:.1}" fill="none" stroke="#cccccc" stroke-width="0.8"/>"#
+            r##"<rect x="{ml:.1}" y="{mt:.1}" width="{pw:.1}" height="{ph:.1}" fill="none" stroke="#cccccc" stroke-width="0.8"/>"##
         );
 
         // Clipping region
@@ -264,19 +264,19 @@ impl Plot {
         // Axes labels
         if !self.xlabel.is_empty() {
             let _ = write!(svg,
-                r#"<text x="{:.1}" y="{:.1}" text-anchor="middle" font-size="12" fill="#444">{}</text>"#,
+                r##"<text x="{:.1}" y="{:.1}" text-anchor="middle" font-size="12" fill="#444">{}</text>"##,
                 ml + pw / 2.0, h - 5.0, escape_xml(&self.xlabel)
             );
         }
         if !self.ylabel.is_empty() {
             let _ = write!(svg,
-                r#"<text transform="rotate(-90)" x="{:.1}" y="{:.1}" text-anchor="middle" font-size="12" fill="#444">{}</text>"#,
+                r##"<text transform="rotate(-90)" x="{:.1}" y="{:.1}" text-anchor="middle" font-size="12" fill="#444">{}</text>"##,
                 -(mt + ph / 2.0), 13.0, escape_xml(&self.ylabel)
             );
         }
         if !self.title.is_empty() {
             let _ = write!(svg,
-                r#"<text x="{:.1}" y="{:.1}" text-anchor="middle" font-size="14" font-weight="500" fill="#222">{}</text>"#,
+                r##"<text x="{:.1}" y="{:.1}" text-anchor="middle" font-size="14" font-weight="500" fill="#222">{}</text>"##,
                 w / 2.0, mt - 8.0, escape_xml(&self.title)
             );
         }
@@ -298,7 +298,7 @@ impl Plot {
                     lx - 18.0, ly + 4.0
                 );
                 let _ = write!(svg,
-                    r#"<text x="{:.1}" y="{:.1}" text-anchor="end" font-size="11" fill="#444">{}</text>"#,
+                    r##"<text x="{:.1}" y="{:.1}" text-anchor="end" font-size="11" fill="#444">{}</text>"##,
                     lx - 22.0, ly + 10.0, escape_xml(label)
                 );
                 ly += 16.0;
@@ -393,7 +393,7 @@ impl Plot {
         print!("         ");
         for i in 0..=ticks {
             let xv = xmin + xrange * i as f64 / ticks as f64;
-            let pos = (i * (COLS / ticks)).min(COLS - 1);
+            let _pos = (i * (COLS / ticks)).min(COLS - 1);
             let s = format!("{xv:.1}");
             print!("{:<width$}", s, width = if i < ticks { COLS / ticks } else { s.len() });
         }
@@ -448,7 +448,7 @@ impl Plot {
     fn render_series(
         &self, svg: &mut String, s: &Series,
         sx: &impl Fn(f64) -> f64, sy: &impl Fn(f64) -> f64,
-        mt: f64, ph: f64, ml: f64, pw: f64,
+        _mt: f64, _ph: f64, _ml: f64, pw: f64,
     ) {
         match s {
             Series::Line { x, y, color, .. } => {
