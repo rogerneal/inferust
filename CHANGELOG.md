@@ -4,6 +4,8 @@ All notable changes to `inferust` are documented here. This project follows sema
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-05-01
+
 ### Added
 
 - Exposed `regression::Gls` / `Fgls` and `RollingOls` / `RecursiveOls` from the public regression module.
