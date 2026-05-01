@@ -4,6 +4,11 @@ All notable changes to `inferust` are documented here. This project follows sema
 
 ## [Unreleased]
 
+### Added
+
+- Added `formula!` macro for Rust-native formula strings such as `formula!(y ~ x1 + C(group))`.
+- Added string categorical columns to `DataFrame` via `with_categorical_column` / `add_categorical_column`, with `C(column)` treatment-dummy expansion.
+
 ## [0.1.9] - 2026-05-01
 
 ### Fixed

@@ -21,7 +21,7 @@
 | `hypothesis::chisq` | Goodness-of-fit and independence (contingency table) | `scipy.stats.chisquare`, `chi2_contingency` |
 | `hypothesis::anova` | One-way ANOVA table (SS, MS, F, p) | `scipy.stats.f_oneway` |
 | `descriptive::Summary` | mean, std, variance, min/max, quartiles, skewness, excess kurtosis | `pd.Series.describe()` |
-| `data::DataFrame` | named numeric columns and formula-based OLS/WLS/logistic/Poisson fitting | `statsmodels.formula.api` basics |
+| `data::DataFrame` | named numeric/string columns, `formula!` macro, and formula-based OLS/WLS/logistic/Poisson fitting with categorical dummy expansion | `statsmodels.formula.api` basics |
 | `glm::Logistic` / `Poisson` | binary logistic and Poisson count regression with MLE estimates, Wald inference, covariance, residual diagnostics, likelihood-ratio tests, prediction intervals, classification metrics, and post-estimation helpers | `statsmodels.Logit().fit()`, `statsmodels.GLM(..., Poisson()).fit()` |
 | `discrete` | Probit, negative binomial, multinomial logit starters | `statsmodels.discrete` basics |
 | `glm_family` | generic Gaussian/Binomial/Poisson GLM dispatch | `statsmodels.GLM` basics |
@@ -107,7 +107,20 @@ let frame = DataFrame::new()
 let result = frame.ols("score ~ hours + gpa").unwrap();
 ```
 
-Formula support includes numeric `response ~ x1 + x2` terms, plus treatment dummy expansion for numeric-coded categorical columns via `design_matrices_with_categorical` and `ols_with_categorical`. Intercepts are handled by the model builders.
+Formula support includes numeric `response ~ x1 + x2` terms, treatment dummy expansion for numeric-coded or string categorical columns with `C(group)`, interactions, offsets, and no-intercept formulas. Intercepts are handled by the model builders.
+
+```rust
+let frame = DataFrame::new()
+    .with_column("score", vec![55.0, 70.0, 80.0, 90.0]).unwrap()
+    .with_column("hours", vec![2.0, 5.0, 8.0, 11.0]).unwrap()
+    .with_categorical_column("classroom", vec!["A", "B", "A", "C"]).unwrap();
+
+let result = frame.ols(inferust::formula!(score ~ hours + C(classroom))).unwrap();
+```
+
+For Polars users, collect a Utf8/Categorical column into `Vec<String>` or
+`Vec<&str>` and pass it to `with_categorical_column`; inferust keeps Polars
+optional rather than forcing it as a dependency.
 
 ### Weighted least squares
 

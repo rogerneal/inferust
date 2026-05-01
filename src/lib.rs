@@ -39,6 +39,14 @@
 //! - `"y ~ x1 * x2"`            — main effects + interaction
 //! - `"y ~ x + offset(exp)"`    — Poisson offset
 //!
+//! For Rust-native ergonomics, the [`formula!`] macro turns formula-like tokens
+//! into a formula string:
+//!
+//! ```rust
+//! let f = inferust::formula!(y ~ x1 + C(group));
+//! assert_eq!(f, "y ~ x1 + C(group)");
+//! ```
+//!
 //! ## Quick start
 //!
 //! ```rust
@@ -73,3 +81,21 @@ pub mod survival;
 pub mod time_series;
 
 pub use error::{InferustError, Result};
+
+/// Build a formula string from Rust tokens.
+///
+/// This is a lightweight convenience for APIs that accept `&str`, such as
+/// `DataFrame::ols`, `DataFrame::wls`, `DataFrame::logistic`, and
+/// `DataFrame::poisson`.
+///
+/// # Example
+/// ```rust
+/// let f = inferust::formula!(score ~ hours + C(classroom));
+/// assert_eq!(f, "score ~ hours + C(classroom)");
+/// ```
+#[macro_export]
+macro_rules! formula {
+    ($lhs:ident ~ $($rhs:tt)+) => {
+        concat!(stringify!($lhs), " ~ ", stringify!($($rhs)+))
+    };
+}

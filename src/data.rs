@@ -169,9 +169,13 @@ impl Formula {
 
 /// Strip `func(inner)` → `inner` if the token matches `func(...)`.
 fn strip_fn_call<'a>(tok: &'a str, func: &str) -> Option<&'a str> {
-    let prefix = format!("{func}(");
-    if tok.starts_with(prefix.as_str()) && tok.ends_with(')') {
-        Some(&tok[prefix.len()..tok.len() - 1])
+    let tok = tok.trim();
+    if let Some(rest) = tok.strip_prefix(func) {
+        let rest = rest.trim_start();
+        if rest.starts_with('(') && rest.ends_with(')') {
+            return Some(rest[1..rest.len() - 1].trim());
+        }
+        None
     } else {
         None
     }
@@ -192,10 +196,11 @@ pub struct DesignMatrices {
     pub offset: Option<Vec<f64>>,
 }
 
-/// Minimal named-column numeric data frame for formula-based fitting.
+/// Minimal named-column data frame for formula-based fitting.
 #[derive(Debug, Clone, Default)]
 pub struct DataFrame {
     columns: BTreeMap<String, Vec<f64>>,
+    categorical_columns: BTreeMap<String, Vec<String>>,
     nrows: Option<usize>,
 }
 
@@ -211,28 +216,72 @@ impl DataFrame {
         Ok(self)
     }
 
+    /// Add a string/categorical column. All columns must have the same length.
+    ///
+    /// Use `C(name)` in a formula to one-hot encode the labels with treatment
+    /// coding. The lexicographically smallest level is used as the reference.
+    ///
+    /// This keeps `inferust` dependency-light while making it easy to pass
+    /// labels collected from a Polars/String/Categorical column.
+    pub fn with_categorical_column<S: Into<String>>(
+        mut self,
+        name: impl Into<String>,
+        values: Vec<S>,
+    ) -> Result<Self> {
+        self.add_categorical_column(name, values)?;
+        Ok(self)
+    }
+
     /// Add a numeric column in-place. All columns must have the same length.
     pub fn add_column(&mut self, name: impl Into<String>, values: Vec<f64>) -> Result<()> {
         let name = name.into();
+        self.validate_column(&name, values.len())?;
+        if self.categorical_columns.contains_key(&name) {
+            return Err(InferustError::InvalidInput(format!(
+                "column `{name}` already exists as categorical"
+            )));
+        }
+        self.columns.insert(name, values);
+        Ok(())
+    }
+
+    /// Add a string/categorical column in-place. All columns must have the same length.
+    pub fn add_categorical_column<S: Into<String>>(
+        &mut self,
+        name: impl Into<String>,
+        values: Vec<S>,
+    ) -> Result<()> {
+        let name = name.into();
+        self.validate_column(&name, values.len())?;
+        if self.columns.contains_key(&name) {
+            return Err(InferustError::InvalidInput(format!(
+                "column `{name}` already exists as numeric"
+            )));
+        }
+        let values = values.into_iter().map(Into::into).collect();
+        self.categorical_columns.insert(name, values);
+        Ok(())
+    }
+
+    fn validate_column(&mut self, name: &str, len: usize) -> Result<()> {
         if name.trim().is_empty() {
             return Err(InferustError::InvalidInput(
                 "column name cannot be empty".into(),
             ));
         }
-        if values.is_empty() {
+        if len == 0 {
             return Err(InferustError::InsufficientData { needed: 1, got: 0 });
         }
         if let Some(nrows) = self.nrows {
-            if values.len() != nrows {
+            if len != nrows {
                 return Err(InferustError::DimensionMismatch {
-                    x_rows: values.len(),
+                    x_rows: len,
                     y_len: nrows,
                 });
             }
         } else {
-            self.nrows = Some(values.len());
+            self.nrows = Some(len);
         }
-        self.columns.insert(name, values);
         Ok(())
     }
 
@@ -243,10 +292,32 @@ impl DataFrame {
 
     /// Borrow a column by name.
     pub fn column(&self, name: &str) -> Result<&[f64]> {
-        self.columns
-            .get(name)
-            .map(Vec::as_slice)
-            .ok_or_else(|| InferustError::InvalidInput(format!("unknown column `{name}`")))
+        if let Some(column) = self.columns.get(name) {
+            return Ok(column.as_slice());
+        }
+        if self.categorical_columns.contains_key(name) {
+            return Err(InferustError::InvalidInput(format!(
+                "column `{name}` is categorical; use C({name}) in a formula"
+            )));
+        }
+        Err(InferustError::InvalidInput(format!(
+            "unknown column `{name}`"
+        )))
+    }
+
+    /// Borrow a categorical column by name.
+    pub fn categorical_column(&self, name: &str) -> Result<&[String]> {
+        if let Some(column) = self.categorical_columns.get(name) {
+            return Ok(column.as_slice());
+        }
+        if self.columns.contains_key(name) {
+            return Err(InferustError::InvalidInput(format!(
+                "column `{name}` is numeric"
+            )));
+        }
+        Err(InferustError::InvalidInput(format!(
+            "unknown column `{name}`"
+        )))
     }
 
     /// Build design matrices from a formula string.
@@ -312,7 +383,7 @@ impl DataFrame {
         })
     }
 
-    /// One-hot expand a numeric-coded categorical column (reference = smallest level).
+    /// One-hot expand a categorical column (reference = smallest sorted level).
     fn expand_categorical(
         &self,
         col: &str,
@@ -320,17 +391,35 @@ impl DataFrame {
         x: &mut [Vec<f64>],
         names: &mut Vec<String>,
     ) -> Result<()> {
-        let data = self.column(col)?;
-        let mut levels = data.to_vec();
-        levels.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        levels.dedup_by(|a, b| (*a - *b).abs() < f64::EPSILON);
-        for &level in levels.iter().skip(1) {
-            names.push(format!("{col}[T.{level}]"));
-            for row in 0..nrows {
-                x[row].push(f64::from((data[row] - level).abs() < f64::EPSILON));
+        if let Some(data) = self.columns.get(col) {
+            let mut levels = data.clone();
+            levels.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            levels.dedup_by(|a, b| (*a - *b).abs() < f64::EPSILON);
+            for &level in levels.iter().skip(1) {
+                names.push(format!("{col}[T.{level}]"));
+                for row in 0..nrows {
+                    x[row].push(f64::from((data[row] - level).abs() < f64::EPSILON));
+                }
             }
+            return Ok(());
         }
-        Ok(())
+
+        if let Some(data) = self.categorical_columns.get(col) {
+            let mut levels = data.clone();
+            levels.sort();
+            levels.dedup();
+            for level in levels.iter().skip(1) {
+                names.push(format!("{col}[T.{level}]"));
+                for row in 0..nrows {
+                    x[row].push(f64::from(data[row] == *level));
+                }
+            }
+            return Ok(());
+        }
+
+        Err(InferustError::InvalidInput(format!(
+            "unknown column `{col}`"
+        )))
     }
 
     /// Fit OLS from a formula.
@@ -478,6 +567,13 @@ mod tests {
     }
 
     #[test]
+    fn formula_accepts_macro_stringified_function_spacing() {
+        use super::FormulaTerm;
+        let f = Formula::parse("y ~ x1 + C ( group )").unwrap();
+        assert!(f.terms.contains(&FormulaTerm::Categorical("group".into())));
+    }
+
+    #[test]
     fn formula_offset() {
         use super::FormulaTerm;
         let f = Formula::parse("y ~ x1 + offset(exposure)").unwrap();
@@ -510,6 +606,34 @@ mod tests {
             vec!["group[T.2]", "group[T.3]", "x"]
         );
         assert_eq!(design.x[2], vec![1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn string_categorical_formula_expands_treatment_dummies() {
+        let frame = DataFrame::new()
+            .with_categorical_column("group", vec!["a", "a", "b", "b", "c", "c"])
+            .unwrap()
+            .with_column("x", vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0])
+            .unwrap()
+            .with_column("y", vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+            .unwrap();
+        let design = frame.design_matrices("y ~ C(group) + x").unwrap();
+        assert_eq!(
+            design.predictor_names,
+            vec!["group[T.b]", "group[T.c]", "x"]
+        );
+        assert_eq!(design.x[2], vec![1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn categorical_column_requires_c_formula_term() {
+        let frame = DataFrame::new()
+            .with_categorical_column("group", vec!["a", "b"])
+            .unwrap()
+            .with_column("y", vec![1.0, 2.0])
+            .unwrap();
+        let err = frame.design_matrices("y ~ group").unwrap_err();
+        assert!(format!("{err}").contains("use C(group)"));
     }
 
     #[test]
