@@ -2000,7 +2000,7 @@ impl Vecm {
 
         // Symmetrise: M_sym = (M + M')/2 for SymmetricEigen
         let m_sym = (&m + m.transpose()) * 0.5;
-        let eig = nalgebra::linalg::SymmetricEigen::new(m_sym);
+        let eig = nalgebra::SymmetricEigen::new(m_sym);
         let mut eig_pairs: Vec<(f64, Vec<f64>)> = eig
             .eigenvalues
             .iter()

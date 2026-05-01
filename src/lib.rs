@@ -16,6 +16,7 @@
 //! | [`glm_family`] | Generic Gaussian/Binomial/Poisson GLM front-end |
 //! | [`evaluation`] | Regression/classification metrics and bootstrap intervals |
 //! | [`graphics`] | Dependency-light SVG plots for lines, scatter, residuals, and ACF bars |
+//! | [`plot`] | Full-featured SVG/ASCII plot builder: line, scatter, bar, step, band, ACF, survival, and residual charts |
 //! | [`robust`] | Huber robust linear regression |
 //! | [`gee`] | Independence-working-correlation GEE |
 //! | [`mixed`] | Random-intercept mixed linear model |
@@ -74,6 +75,7 @@ pub mod glm;
 pub mod glm_family;
 pub mod graphics;
 pub mod hypothesis;
+pub mod plot;
 pub mod mixed;
 pub mod regression;
 pub mod robust;

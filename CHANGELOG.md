@@ -9,6 +9,30 @@ All notable changes to `inferust` are documented here. This project follows sema
 - Added `formula!` macro for Rust-native formula strings such as `formula!(y ~ x1 + C(group))`.
 - Added string categorical columns to `DataFrame` via `with_categorical_column` / `add_categorical_column`, with `C(column)` treatment-dummy expansion.
 
+## [0.1.10] - 2026-05-01
+
+### Added
+
+#### GLS / FGLS (`regression`)
+- **Generalized Least Squares** (`Gls`) for arbitrary known error covariance Ω: Cholesky-factored (XᵀΩ⁻¹X)⁻¹ XᵀΩ⁻¹y transform with full Wald inference and summary.
+- **Feasible GLS** (`Fgls`) via iterative Cochrane-Orcutt with Prais-Winsten first-observation correction; converges in ≤ 50 iterations, exposes estimated AR(1) autocorrelation ρ.
+
+#### Rolling / Recursive OLS (`regression`)
+- **Rolling OLS** (`RollingOls`) — independent OLS within a sliding window; returns per-window coefficients, standard errors, R², and `.slopes()` helper for a time-path of a single coefficient.
+- **Recursive OLS** (`RecursiveOls`) — Sherman-Morrison rank-1 covariance update; computes recursive residuals, CUSUM path, and Brown-Durbin-Evans (1975) boundaries; `.cusum_reject()` and `.print_cusum()` helpers.
+
+#### Seasonal Models (`time_series`)
+- **SARIMA(p,d,q)(P,D,Q,s)** — multiplicative seasonal differencing, CSS estimation, Adam optimiser; `SarimaResult::forecast(history, steps)` with correct multi-level undifferencing.
+- **SARIMAX** — exogenous regressors projected out via OLS before SARIMA fit on residuals; exposes `exog_coefficients` alongside the full `SarimaResult`.
+- **VECM** (`Vecm`) — Johansen reduced-rank regression via symmetrized generalized EVP; trace statistics, cointegrating vectors β, adjustment speeds α, short-run matrices Γ, and `print_summary`.
+- **VARMAX** (`Varmax`) — VAR extended with exogenous columns in each equation's OLS regressor matrix; `VarmaxResult::forecast(history, exog_future)`.
+
+#### Plot module (`plot`)
+- New `Plot` builder with `line`, `scatter`, `bar`, `step`, `band`, `hline` series types.
+- Convenience constructors: `Plot::acf`, `Plot::survival`, `Plot::residuals`.
+- `to_svg() -> String` renders a self-contained SVG with clip-path, axis labels, title, and per-series legend.
+- `save(path)` writes the SVG file; `print_ascii()` renders a 70 × 20 grid to the terminal.
+
 ## [0.1.9] - 2026-05-01
 
 ### Fixed
