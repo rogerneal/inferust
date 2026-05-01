@@ -420,7 +420,7 @@ impl GlsResult {
 
     /// Predict for new observations (rows of `x_new`).
     pub fn predict(&self, x_new: &[Vec<f64>]) -> Vec<f64> {
-        let has_const = self.feature_names.first().map_or(false, |n| n == "const");
+        let has_const = self.feature_names.first().is_some_and(|n| n == "const");
         x_new
             .iter()
             .map(|row| {

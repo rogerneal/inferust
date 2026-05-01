@@ -275,7 +275,7 @@ impl DataFrame {
         for term in &f.terms {
             match term {
                 FormulaTerm::Numeric(col) => {
-                    let is_cat = extra_categorical.iter().any(|&c| c == col.as_str());
+                    let is_cat = extra_categorical.contains(&col.as_str());
                     if is_cat {
                         self.expand_categorical(col, nrows, &mut x, &mut predictor_names)?;
                     } else {
@@ -317,7 +317,7 @@ impl DataFrame {
         &self,
         col: &str,
         nrows: usize,
-        x: &mut Vec<Vec<f64>>,
+        x: &mut [Vec<f64>],
         names: &mut Vec<String>,
     ) -> Result<()> {
         let data = self.column(col)?;

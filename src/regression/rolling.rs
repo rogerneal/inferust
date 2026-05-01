@@ -178,7 +178,7 @@ impl RollingOlsResult {
     ///
     /// Returns the second column if an intercept is present, or the first column otherwise.
     pub fn slopes(&self) -> Vec<f64> {
-        let col = if self.feature_names.first().map_or(false, |n| n == "const") {
+        let col = if self.feature_names.first().is_some_and(|n| n == "const") {
             1
         } else {
             0

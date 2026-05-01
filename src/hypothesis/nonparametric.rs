@@ -80,8 +80,8 @@ pub fn mann_whitney(a: &[f64], b: &[f64]) -> Result<MannWhitneyResult> {
             j += 1;
         }
         let avg_rank = (i + 1 + j) as f64 / 2.0; // average of ranks i+1 .. j (1-based)
-        for k in i..j {
-            ranks[k] = avg_rank;
+        for rank in ranks.iter_mut().take(j).skip(i) {
+            *rank = avg_rank;
         }
         i = j;
     }
@@ -215,8 +215,8 @@ pub fn kruskal_wallis(groups: &[&[f64]]) -> Result<KruskalWallisResult> {
         let avg_rank = (i + j + 1) as f64 / 2.0; // average of 1-based ranks
         let t = (j - i) as f64;
         tie_sum += t * t * t - t;
-        for idx in i..j {
-            ranks[idx] = avg_rank;
+        for rank in ranks.iter_mut().take(j).skip(i) {
+            *rank = avg_rank;
         }
         i = j;
     }
@@ -389,7 +389,7 @@ fn ks_p_value(d: f64, n1: usize, n2: usize) -> f64 {
         }
         p += if j % 2 == 1 { term } else { -term };
     }
-    (2.0 * p).min(1.0).max(0.0)
+    (2.0 * p).clamp(0.0, 1.0)
 }
 
 // ── Shapiro-Wilk ──────────────────────────────────────────────────────────────
@@ -464,7 +464,7 @@ pub fn shapiro_wilk(data: &[f64]) -> Result<ShapiroWilkResult> {
         num += a[i] * (sorted[n - 1 - i] - sorted[i]);
     }
     let w = (num * num) / ss;
-    let w = w.min(1.0).max(0.0);
+    let w = w.clamp(0.0, 1.0);
 
     // Royston p-value: transform W to approximately N(0,1)
     let p = royston_p_value(w, n);

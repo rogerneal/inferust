@@ -355,12 +355,12 @@ match result {
 
 ## Roadmap
 
-- [ ] Logistic regression (GLM with logit link)
+- [x] Logistic regression (GLM with logit link)
 - [ ] Ridge / Lasso regularization
 - [x] Durbin-Watson and Breusch-Pagan diagnostic tests
 - [ ] Tukey HSD post-hoc test (after ANOVA)
-- [ ] Time-series: ARIMA / ACF / PACF
-- [ ] Weighted OLS
+- [x] Time-series: ARIMA / ACF / PACF
+- [x] Weighted OLS
 
 Contributions welcome — open an issue or PR!
 

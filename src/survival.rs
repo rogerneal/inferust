@@ -69,7 +69,7 @@ pub struct KaplanMeierResult {
 impl KaplanMeier {
     /// Create a new Kaplan-Meier builder.
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
     /// Fit the Kaplan-Meier estimator.
@@ -134,7 +134,7 @@ impl KaplanMeier {
                     let log_s = survival.ln();
                     let log_se = se / (survival * log_s.abs().max(f64::EPSILON));
                     let (lo, hi) = (log_s * (1.0 + z * log_se), log_s * (1.0 - z * log_se));
-                    (lo.exp().max(0.0).min(1.0), hi.exp().max(0.0).min(1.0))
+                    (lo.exp().clamp(0.0, 1.0), hi.exp().clamp(0.0, 1.0))
                 } else {
                     (0.0, 1.0)
                 };
@@ -664,8 +664,9 @@ fn solve_linear(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Result<Vec<f64>> {
         }
         for row in (col + 1)..n {
             let factor = a[row][col] / pivot;
-            for k in col..n {
-                a[row][k] -= factor * a[col][k];
+            let pivot_tail: Vec<f64> = a[col][col..n].to_vec();
+            for (value, pivot_value) in a[row][col..n].iter_mut().zip(pivot_tail.iter()) {
+                *value -= factor * pivot_value;
             }
             b[row] -= factor * b[col];
         }
@@ -727,16 +728,17 @@ fn invert_symmetric(a: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>> {
             ));
         }
         let inv_pivot = 1.0 / pivot;
-        for k in 0..(2 * n) {
-            aug[col][k] *= inv_pivot;
+        for value in aug[col].iter_mut().take(2 * n) {
+            *value *= inv_pivot;
         }
         for row in 0..n {
             if row == col {
                 continue;
             }
             let factor = aug[row][col];
-            for k in 0..(2 * n) {
-                aug[row][k] -= factor * aug[col][k];
+            let pivot_row = aug[col].clone();
+            for (value, pivot_value) in aug[row].iter_mut().zip(pivot_row.iter()).take(2 * n) {
+                *value -= factor * pivot_value;
             }
         }
     }

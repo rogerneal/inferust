@@ -10,6 +10,7 @@ All notable changes to `inferust` are documented here. This project follows sema
 - Stabilized the Shapiro-Wilk p-value approximation for small near-normal samples.
 - Added light diagonal regularization for Cox PH information-matrix solves in near-singular fixtures.
 - Added Durbin-Watson, Jarque-Bera, skew, kurtosis, and condition number diagnostics to the default OLS/WLS printed summary.
+- Cleaned up clippy warnings in release-touched modules and refreshed completed README roadmap items.
 
 ## [0.1.8] - 2026-05-01
 

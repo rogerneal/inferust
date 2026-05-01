@@ -440,7 +440,7 @@ fn css_residuals(params: &[f64], y: &[f64], p: usize, q: usize) -> Vec<f64> {
             pred += params[1 + i] * y[t - 1 - i];
         }
         for j in 0..q {
-            if t >= j + 1 {
+            if t > j {
                 pred += params[1 + p + j] * eps[t - 1 - j];
             }
         }
@@ -512,7 +512,7 @@ fn css_fitted_residuals(params: &[f64], y: &[f64], p: usize, q: usize) -> (Vec<f
             pred += params[1 + i] * y[t - 1 - i];
         }
         for j in 0..q {
-            if t >= j + 1 {
+            if t > j {
                 pred += params[1 + p + j] * eps[t - 1 - j];
             }
         }
@@ -1536,13 +1536,13 @@ fn sarima_css_residuals(
         let mut pred = params[0]; // intercept
                                   // Non-seasonal AR
         for i in 0..p {
-            if t >= i + 1 {
+            if t > i {
                 pred += params[1 + i] * y[t - 1 - i];
             }
         }
         // Non-seasonal MA
         for j in 0..q {
-            if t >= j + 1 {
+            if t > j {
                 pred += params[1 + p + j] * eps[t - 1 - j];
             }
         }
@@ -1619,6 +1619,7 @@ fn sarima_css_gradient(
     grad
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sarima_css_optimize(
     y: &[f64],
     p: usize,
@@ -1669,12 +1670,12 @@ fn sarima_css_fitted(
     for t in start..n {
         let mut pred = params[0];
         for i in 0..p {
-            if t >= i + 1 {
+            if t > i {
                 pred += params[1 + i] * y[t - 1 - i];
             }
         }
         for j in 0..q {
-            if t >= j + 1 {
+            if t > j {
                 pred += params[1 + p + j] * eps[t - 1 - j];
             }
         }
@@ -2153,9 +2154,9 @@ fn moment_matrix(r: &[Vec<f64>], n: usize, k: usize) -> Vec<Vec<f64>> {
             }
         }
     }
-    for i in 0..k {
-        for j in 0..k {
-            s[i][j] /= n as f64;
+    for row in s.iter_mut().take(k) {
+        for value in row.iter_mut().take(k) {
+            *value /= n as f64;
         }
     }
     s
@@ -2170,9 +2171,9 @@ fn cross_moment(r0: &[Vec<f64>], r1: &[Vec<f64>], n: usize, k: usize) -> Vec<Vec
             }
         }
     }
-    for i in 0..k {
-        for j in 0..k {
-            s[i][j] /= n as f64;
+    for row in s.iter_mut().take(k) {
+        for value in row.iter_mut().take(k) {
+            *value /= n as f64;
         }
     }
     s
@@ -2371,7 +2372,7 @@ impl VarmaxResult {
         let mut bufs: Vec<Vec<f64>> = history.to_vec();
         let mut out: Vec<Vec<f64>> = vec![Vec::with_capacity(steps); self.k];
 
-        for step in 0..steps {
+        for exog_row in exog_future.iter().take(steps) {
             let t = bufs[0].len();
             let mut row = Vec::with_capacity(self.k * self.lags + self.k_x + 1);
             row.push(1.0);
@@ -2380,7 +2381,7 @@ impl VarmaxResult {
                     row.push(if t >= lag { buf[t - lag] } else { 0.0 });
                 }
             }
-            for &xval in exog_future[step].iter() {
+            for &xval in exog_row.iter() {
                 row.push(xval);
             }
             for (i, coefs) in self.coefficients.iter().enumerate() {
