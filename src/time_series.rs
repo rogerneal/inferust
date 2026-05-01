@@ -1065,13 +1065,6 @@ pub fn kpss_test(y: &[f64], lags: usize, trend: bool) -> Result<KpssResult> {
 mod tests {
     use super::{acf, adf_test, kpss_test, ljung_box, pacf, Arima, AutoRegressive, Var};
 
-    fn assert_close(a: f64, b: f64, tol: f64) {
-        assert!(
-            (a - b).abs() <= tol,
-            "expected {b:.6} got {a:.6} (tol {tol})"
-        );
-    }
-
     #[test]
     fn ar_fits_and_forecasts() {
         let y = vec![1.0, 1.8, 2.7, 3.5, 4.6, 5.4, 6.5, 7.4, 8.3];

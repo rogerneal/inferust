@@ -32,9 +32,7 @@ use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 /// Handles right-censored data. Event times where `event = 0` are treated as
 /// censored.
 #[derive(Debug, Clone, Default)]
-pub struct KaplanMeier {
-    feature_names: Vec<String>,
-}
+pub struct KaplanMeier;
 
 /// A single step on the Kaplan-Meier survival curve.
 #[derive(Debug, Clone)]
@@ -70,7 +68,9 @@ pub struct KaplanMeierResult {
 
 impl KaplanMeier {
     /// Create a new Kaplan-Meier builder.
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Fit the Kaplan-Meier estimator.
     ///
@@ -82,13 +82,17 @@ impl KaplanMeier {
             return Err(InferustError::InsufficientData { needed: 1, got: 0 });
         }
         if events.len() != n {
-            return Err(InferustError::DimensionMismatch { x_rows: events.len(), y_len: n });
+            return Err(InferustError::DimensionMismatch {
+                x_rows: events.len(),
+                y_len: n,
+            });
         }
 
         // Sort by time, events before censoring at tied times
         let mut order: Vec<usize> = (0..n).collect();
         order.sort_by(|&a, &b| {
-            times[a].partial_cmp(&times[b])
+            times[a]
+                .partial_cmp(&times[b])
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(events[b].cmp(&events[a])) // events first at ties
         });
@@ -107,7 +111,11 @@ impl KaplanMeier {
             let mut d = 0usize; // deaths/events
             let mut c = 0usize; // censored
             while i < n && (times[order[i]] - t).abs() < f64::EPSILON {
-                if events[order[i]] == 1 { d += 1; } else { c += 1; }
+                if events[order[i]] == 1 {
+                    d += 1;
+                } else {
+                    c += 1;
+                }
                 i += 1;
             }
 
@@ -130,7 +138,14 @@ impl KaplanMeier {
                 } else {
                     (0.0, 1.0)
                 };
-                curve.push(KmStep { time: t, n_at_risk, n_events: d, survival, ci_lower, ci_upper });
+                curve.push(KmStep {
+                    time: t,
+                    n_at_risk,
+                    n_events: d,
+                    survival,
+                    ci_lower,
+                    ci_upper,
+                });
             }
             n_at_risk -= d + c;
         }
@@ -139,7 +154,13 @@ impl KaplanMeier {
         let rmst = compute_rmst(&curve);
         let median_survival = curve.iter().find(|s| s.survival <= 0.5).map(|s| s.time);
 
-        Ok(KaplanMeierResult { curve, n, n_events: total_events, rmst, median_survival })
+        Ok(KaplanMeierResult {
+            curve,
+            n,
+            n_events: total_events,
+            rmst,
+            median_survival,
+        })
     }
 }
 
@@ -149,7 +170,9 @@ impl KaplanMeierResult {
         // Return last S before or at t
         let mut s = 1.0;
         for step in &self.curve {
-            if step.time > t { break; }
+            if step.time > t {
+                break;
+            }
             s = step.survival;
         }
         s
@@ -159,17 +182,25 @@ impl KaplanMeierResult {
     pub fn print_summary(&self) {
         println!();
         println!("── Kaplan-Meier Survival Estimate ─────────────────────────────────");
-        println!("  n = {}   events = {}   median survival = {}",
-            self.n, self.n_events,
-            self.median_survival.map_or("undefined".to_string(), |m| format!("{m:.3}")));
+        println!(
+            "  n = {}   events = {}   median survival = {}",
+            self.n,
+            self.n_events,
+            self.median_survival
+                .map_or("undefined".to_string(), |m| format!("{m:.3}"))
+        );
         println!("  RMST = {:.4}", self.rmst);
         println!();
-        println!("{:>10} {:>10} {:>10} {:>10} {:>10} {:>10}",
-            "Time", "N.risk", "N.event", "Survival", "CI lower", "CI upper");
+        println!(
+            "{:>10} {:>10} {:>10} {:>10} {:>10} {:>10}",
+            "Time", "N.risk", "N.event", "Survival", "CI lower", "CI upper"
+        );
         println!("{}", "─".repeat(65));
         for s in &self.curve {
-            println!("{:>10.3} {:>10} {:>10} {:>10.4} {:>10.4} {:>10.4}",
-                s.time, s.n_at_risk, s.n_events, s.survival, s.ci_lower, s.ci_upper);
+            println!(
+                "{:>10.3} {:>10} {:>10} {:>10.4} {:>10.4} {:>10.4}",
+                s.time, s.n_at_risk, s.n_events, s.survival, s.ci_lower, s.ci_upper
+            );
         }
         println!();
     }
@@ -203,7 +234,10 @@ impl LogRankResult {
     pub fn print(&self) {
         println!();
         println!("── Log-Rank Test ──────────────────────────────────────");
-        println!("  χ²({}) = {:.4}   p = {:.6}", 1, self.statistic, self.p_value);
+        println!(
+            "  χ²({}) = {:.4}   p = {:.6}",
+            1, self.statistic, self.p_value
+        );
         if self.p_value < 0.05 {
             println!("  ✓ Reject H₀ (p < 0.05): survival curves differ.");
         } else {
@@ -218,35 +252,59 @@ impl LogRankResult {
 /// * `times1`, `events1` — group 1 observed times and event indicators.
 /// * `times2`, `events2` — group 2 observed times and event indicators.
 pub fn log_rank_test(
-    times1: &[f64], events1: &[usize],
-    times2: &[f64], events2: &[usize],
+    times1: &[f64],
+    events1: &[usize],
+    times2: &[f64],
+    events2: &[usize],
 ) -> Result<LogRankResult> {
     let n1 = times1.len();
     let n2 = times2.len();
     if n1 < 1 || n2 < 1 {
-        return Err(InferustError::InsufficientData { needed: 1, got: n1.min(n2) });
+        return Err(InferustError::InsufficientData {
+            needed: 1,
+            got: n1.min(n2),
+        });
     }
 
     // Collect all unique event times (not censored)
-    let mut event_times: Vec<f64> = times1.iter().zip(events1.iter())
-        .filter(|(_, &e)| e == 1).map(|(&t, _)| t)
-        .chain(times2.iter().zip(events2.iter()).filter(|(_, &e)| e == 1).map(|(&t, _)| t))
+    let mut event_times: Vec<f64> = times1
+        .iter()
+        .zip(events1.iter())
+        .filter(|(_, &e)| e == 1)
+        .map(|(&t, _)| t)
+        .chain(
+            times2
+                .iter()
+                .zip(events2.iter())
+                .filter(|(_, &e)| e == 1)
+                .map(|(&t, _)| t),
+        )
         .collect();
     event_times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     event_times.dedup_by(|a, b| (*a - *b).abs() < f64::EPSILON);
 
-    let mut o_e = 0.0_f64;    // Σ (O₁ - E₁)
-    let mut var = 0.0_f64;    // Σ Var(O₁)
+    let mut o_e = 0.0_f64; // Σ (O₁ - E₁)
+    let mut var = 0.0_f64; // Σ Var(O₁)
 
     for &t in &event_times {
         let n_at_risk_1 = times1.iter().filter(|&&ti| ti >= t).count();
         let n_at_risk_2 = times2.iter().filter(|&&ti| ti >= t).count();
-        let d1 = times1.iter().zip(events1.iter()).filter(|(&ti, &ei)| (ti - t).abs() < f64::EPSILON && ei == 1).count();
-        let d2 = times2.iter().zip(events2.iter()).filter(|(&ti, &ei)| (ti - t).abs() < f64::EPSILON && ei == 1).count();
+        let d1 = times1
+            .iter()
+            .zip(events1.iter())
+            .filter(|(&ti, &ei)| (ti - t).abs() < f64::EPSILON && ei == 1)
+            .count();
+        let d2 = times2
+            .iter()
+            .zip(events2.iter())
+            .filter(|(&ti, &ei)| (ti - t).abs() < f64::EPSILON && ei == 1)
+            .count();
 
         let n = (n_at_risk_1 + n_at_risk_2) as f64;
         let d = (d1 + d2) as f64;
-        if n < 2.0 { continue; }
+        if n < 2.0 {
+            continue;
+        }
 
         let e1 = n_at_risk_1 as f64 * d / n;
         o_e += d1 as f64 - e1;
@@ -257,12 +315,19 @@ pub fn log_rank_test(
         var += n1f * n2f * d * (n - d) / (n * n * (n - 1.0));
     }
 
-    let stat = if var > f64::EPSILON { o_e * o_e / var } else { 0.0 };
+    let stat = if var > f64::EPSILON {
+        o_e * o_e / var
+    } else {
+        0.0
+    };
     let chi = ChiSquared::new(1.0)
         .map_err(|_| InferustError::InvalidInput("chi-squared distribution error".into()))?;
     let p = 1.0 - chi.cdf(stat);
 
-    Ok(LogRankResult { statistic: stat, p_value: p })
+    Ok(LogRankResult {
+        statistic: stat,
+        p_value: p,
+    })
 }
 
 // ── Cox PH ────────────────────────────────────────────────────────────────────
@@ -309,7 +374,9 @@ pub struct CoxPhResult {
 }
 
 impl Default for CoxPh {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CoxPh {
@@ -345,15 +412,23 @@ impl CoxPh {
             return Err(InferustError::InsufficientData { needed: 2, got: n });
         }
         if events.len() != n || x.len() != n {
-            return Err(InferustError::DimensionMismatch { x_rows: x.len(), y_len: n });
+            return Err(InferustError::DimensionMismatch {
+                x_rows: x.len(),
+                y_len: n,
+            });
         }
         let p = x[0].len();
         if p == 0 {
-            return Err(InferustError::InvalidInput("CoxPh requires at least one covariate".into()));
+            return Err(InferustError::InvalidInput(
+                "CoxPh requires at least one covariate".into(),
+            ));
         }
         for row in x.iter() {
             if row.len() != p {
-                return Err(InferustError::DimensionMismatch { x_rows: row.len(), y_len: p });
+                return Err(InferustError::DimensionMismatch {
+                    x_rows: row.len(),
+                    y_len: p,
+                });
             }
         }
 
@@ -365,7 +440,9 @@ impl CoxPh {
         // Sort by time (events before censored at ties — Breslow tie handling)
         let mut order: Vec<usize> = (0..n).collect();
         order.sort_by(|&a, &b| {
-            times[a].partial_cmp(&times[b]).unwrap_or(std::cmp::Ordering::Equal)
+            times[a]
+                .partial_cmp(&times[b])
+                .unwrap_or(std::cmp::Ordering::Equal)
                 .then(events[b].cmp(&events[a]))
         });
 
@@ -380,11 +457,15 @@ impl CoxPh {
 
         for iter in 0..self.max_iter {
             let (score, hessian) = cox_score_hessian(&t_sorted, &e_sorted, &x_sorted, &beta);
-            let step = solve_linear(hessian, score)?;
+            let step = solve_linear_regularized(hessian, score)?;
             let max_step: f64 = step.iter().map(|s| s.abs()).fold(0.0_f64, f64::max);
-            for j in 0..p { beta[j] += step[j]; }
+            for j in 0..p {
+                beta[j] += step[j];
+            }
             iterations = iter + 1;
-            if max_step < self.tolerance { break; }
+            if max_step < self.tolerance {
+                break;
+            }
         }
 
         let ll = cox_partial_ll(&t_sorted, &e_sorted, &x_sorted, &beta);
@@ -395,16 +476,21 @@ impl CoxPh {
 
         // Standard errors from observed information (negated Hessian)
         let (_, hessian) = cox_score_hessian(&t_sorted, &e_sorted, &x_sorted, &beta);
-        let var_cov = invert_symmetric(hessian)?;
+        let var_cov = invert_symmetric_regularized(hessian)?;
         let se: Vec<f64> = (0..p).map(|j| var_cov[j][j].abs().sqrt()).collect();
 
         let normal = Normal::new(0.0, 1.0)
             .map_err(|_| InferustError::InvalidInput("normal distribution error".into()))?;
         let z: Vec<f64> = beta.iter().zip(se.iter()).map(|(b, s)| b / s).collect();
-        let pv: Vec<f64> = z.iter().map(|&z| 2.0 * (1.0 - normal.cdf(z.abs()))).collect();
+        let pv: Vec<f64> = z
+            .iter()
+            .map(|&z| 2.0 * (1.0 - normal.cdf(z.abs())))
+            .collect();
         let hr: Vec<f64> = beta.iter().map(|b| b.exp()).collect();
         let z196 = normal.inverse_cdf(0.975);
-        let hr_ci: Vec<(f64, f64)> = beta.iter().zip(se.iter())
+        let hr_ci: Vec<(f64, f64)> = beta
+            .iter()
+            .zip(se.iter())
             .map(|(b, s)| ((b - z196 * s).exp(), (b + z196 * s).exp()))
             .collect();
 
@@ -439,16 +525,27 @@ impl CoxPhResult {
         println!("══════════════════════════════════════════════════════════════════");
         println!("  Cox Proportional Hazards Model");
         println!("══════════════════════════════════════════════════════════════════");
-        println!("  n = {}   events = {}   iterations = {}", self.n, self.n_events, self.iterations);
+        println!(
+            "  n = {}   events = {}   iterations = {}",
+            self.n, self.n_events, self.iterations
+        );
         println!("  Log-likelihood: {:.4}", self.log_likelihood);
-        println!("  LR χ²({}) = {:.4}   p = {:.6}", self.feature_names.len(), self.lr_statistic, self.lr_p_value);
+        println!(
+            "  LR χ²({}) = {:.4}   p = {:.6}",
+            self.feature_names.len(),
+            self.lr_statistic,
+            self.lr_p_value
+        );
         println!("──────────────────────────────────────────────────────────────────");
-        println!("{:<18} {:>9} {:>9} {:>8} {:>9} {:>12}",
-            "Variable", "coef", "HR", "SE", "z", "P>|z|");
+        println!(
+            "{:<18} {:>9} {:>9} {:>8} {:>9} {:>12}",
+            "Variable", "coef", "HR", "SE", "z", "P>|z|"
+        );
         println!("{}", "─".repeat(66));
         for i in 0..self.coefficients.len() {
             let (hr_lo, hr_hi) = self.hr_ci[i];
-            println!("{:<18} {:>9.4} {:>9.4} {:>8.4} {:>9.4} {:>9.6}  {}  [{:.4}, {:.4}]",
+            println!(
+                "{:<18} {:>9.4} {:>9.4} {:>8.4} {:>9.4} {:>9.6}  {}  [{:.4}, {:.4}]",
                 self.feature_names[i],
                 self.coefficients[i],
                 self.hazard_ratios[i],
@@ -456,7 +553,9 @@ impl CoxPhResult {
                 self.z_statistics[i],
                 self.p_values[i],
                 sig_stars(self.p_values[i]),
-                hr_lo, hr_hi);
+                hr_lo,
+                hr_hi
+            );
         }
         println!("──────────────────────────────────────────────────────────────────");
         println!("  Significance:  *** p<0.001  ** p<0.01  * p<0.05  . p<0.1");
@@ -470,13 +569,17 @@ impl CoxPhResult {
 /// Breslow partial log-likelihood for sorted data.
 fn cox_partial_ll(times: &[f64], events: &[usize], x: &[Vec<f64>], beta: &[f64]) -> f64 {
     let n = times.len();
-    let p = beta.len();
-    let xb: Vec<f64> = x.iter().map(|row| row.iter().zip(beta).map(|(xi, b)| xi * b).sum()).collect();
+    let xb: Vec<f64> = x
+        .iter()
+        .map(|row| row.iter().zip(beta).map(|(xi, b)| xi * b).sum())
+        .collect();
     let exp_xb: Vec<f64> = xb.iter().map(|v| v.exp()).collect();
 
     let mut ll = 0.0;
     for i in 0..n {
-        if events[i] != 1 { continue; }
+        if events[i] != 1 {
+            continue;
+        }
         // Risk set: all j with t_j >= t_i
         let risk_sum: f64 = (i..n).map(|j| exp_xb[j]).sum();
         ll += xb[i] - risk_sum.ln();
@@ -486,19 +589,31 @@ fn cox_partial_ll(times: &[f64], events: &[usize], x: &[Vec<f64>], beta: &[f64])
 
 /// Score vector and observed information (negated Hessian) for sorted data.
 fn cox_score_hessian(
-    times: &[f64], events: &[usize], x: &[Vec<f64>], beta: &[f64],
+    times: &[f64],
+    events: &[usize],
+    x: &[Vec<f64>],
+    beta: &[f64],
 ) -> (Vec<f64>, Vec<Vec<f64>>) {
     let n = times.len();
     let p = beta.len();
-    let exp_xb: Vec<f64> = x.iter()
-        .map(|row| row.iter().zip(beta).map(|(xi, b)| xi * b).sum::<f64>().exp())
+    let exp_xb: Vec<f64> = x
+        .iter()
+        .map(|row| {
+            row.iter()
+                .zip(beta)
+                .map(|(xi, b)| xi * b)
+                .sum::<f64>()
+                .exp()
+        })
         .collect();
 
     let mut score = vec![0.0_f64; p];
     let mut info = vec![vec![0.0_f64; p]; p];
 
     for i in 0..n {
-        if events[i] != 1 { continue; }
+        if events[i] != 1 {
+            continue;
+        }
         // Risk set: j with t_j >= t_i (data is sorted, so j >= i)
         let mut s0 = 0.0_f64;
         let mut s1 = vec![0.0_f64; p];
@@ -513,7 +628,9 @@ fn cox_score_hessian(
                 }
             }
         }
-        if s0 < f64::EPSILON { continue; }
+        if s0 < f64::EPSILON {
+            continue;
+        }
         for k in 0..p {
             score[k] += x[i][k] - s1[k] / s0;
             for l in 0..p {
@@ -530,17 +647,26 @@ fn solve_linear(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Result<Vec<f64>> {
     for col in 0..n {
         // Partial pivot
         let max_row = (col..n)
-            .max_by(|&r1, &r2| a[r1][col].abs().partial_cmp(&a[r2][col].abs()).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|&r1, &r2| {
+                a[r1][col]
+                    .abs()
+                    .partial_cmp(&a[r2][col].abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .unwrap_or(col);
         a.swap(col, max_row);
         b.swap(col, max_row);
         let pivot = a[col][col];
         if pivot.abs() < f64::EPSILON {
-            return Err(InferustError::InvalidInput("singular information matrix — model may be under-identified".into()));
+            return Err(InferustError::InvalidInput(
+                "singular information matrix — model may be under-identified".into(),
+            ));
         }
         for row in (col + 1)..n {
             let factor = a[row][col] / pivot;
-            for k in col..n { a[row][k] -= factor * a[col][k]; }
+            for k in col..n {
+                a[row][k] -= factor * a[col][k];
+            }
             b[row] -= factor * b[col];
         }
     }
@@ -548,17 +674,35 @@ fn solve_linear(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Result<Vec<f64>> {
     let mut x = vec![0.0_f64; n];
     for i in (0..n).rev() {
         x[i] = b[i];
-        for j in (i + 1)..n { x[i] -= a[i][j] * x[j]; }
+        for j in (i + 1)..n {
+            x[i] -= a[i][j] * x[j];
+        }
         x[i] /= a[i][i];
     }
     Ok(x)
+}
+
+fn solve_linear_regularized(a: Vec<Vec<f64>>, b: Vec<f64>) -> Result<Vec<f64>> {
+    match solve_linear(a.clone(), b.clone()) {
+        Ok(solution) => Ok(solution),
+        Err(_) => {
+            let mut regularized = a;
+            let ridge = diagonal_scale(&regularized) * 1e-8;
+            for (i, row) in regularized.iter_mut().enumerate() {
+                row[i] += ridge;
+            }
+            solve_linear(regularized, b)
+        }
+    }
 }
 
 /// Invert a symmetric positive-definite matrix using Cholesky-like Gaussian elimination.
 fn invert_symmetric(a: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>> {
     let n = a.len();
     // Augment [A | I] and row-reduce
-    let mut aug: Vec<Vec<f64>> = a.iter().enumerate()
+    let mut aug: Vec<Vec<f64>> = a
+        .iter()
+        .enumerate()
         .map(|(i, row)| {
             let mut r = row.clone();
             r.extend((0..n).map(|j| if i == j { 1.0 } else { 0.0 }));
@@ -568,26 +712,72 @@ fn invert_symmetric(a: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>> {
 
     for col in 0..n {
         let max_row = (col..n)
-            .max_by(|&r1, &r2| aug[r1][col].abs().partial_cmp(&aug[r2][col].abs()).unwrap_or(std::cmp::Ordering::Equal))
+            .max_by(|&r1, &r2| {
+                aug[r1][col]
+                    .abs()
+                    .partial_cmp(&aug[r2][col].abs())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .unwrap_or(col);
         aug.swap(col, max_row);
         let pivot = aug[col][col];
         if pivot.abs() < f64::EPSILON {
-            return Err(InferustError::InvalidInput("information matrix is singular".into()));
+            return Err(InferustError::InvalidInput(
+                "information matrix is singular".into(),
+            ));
         }
         let inv_pivot = 1.0 / pivot;
-        for k in 0..(2 * n) { aug[col][k] *= inv_pivot; }
+        for k in 0..(2 * n) {
+            aug[col][k] *= inv_pivot;
+        }
         for row in 0..n {
-            if row == col { continue; }
+            if row == col {
+                continue;
+            }
             let factor = aug[row][col];
-            for k in 0..(2 * n) { aug[row][k] -= factor * aug[col][k]; }
+            for k in 0..(2 * n) {
+                aug[row][k] -= factor * aug[col][k];
+            }
         }
     }
     Ok(aug.iter().map(|row| row[n..].to_vec()).collect())
 }
 
+fn invert_symmetric_regularized(a: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>> {
+    match invert_symmetric(a.clone()) {
+        Ok(inverse) => Ok(inverse),
+        Err(_) => {
+            let mut regularized = a;
+            let ridge = diagonal_scale(&regularized) * 1e-8;
+            for (i, row) in regularized.iter_mut().enumerate() {
+                row[i] += ridge;
+            }
+            invert_symmetric(regularized)
+        }
+    }
+}
+
+fn diagonal_scale(a: &[Vec<f64>]) -> f64 {
+    let scale = a
+        .iter()
+        .enumerate()
+        .map(|(i, row)| row[i].abs())
+        .fold(0.0_f64, f64::max);
+    scale.max(1.0)
+}
+
 fn sig_stars(p: f64) -> &'static str {
-    if p < 0.001 { "***" } else if p < 0.01 { "**" } else if p < 0.05 { "*" } else if p < 0.1 { "." } else { "" }
+    if p < 0.001 {
+        "***"
+    } else if p < 0.01 {
+        "**"
+    } else if p < 0.05 {
+        "*"
+    } else if p < 0.1 {
+        "."
+    } else {
+        ""
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -635,7 +825,9 @@ mod tests {
         let times = vec![5.0, 8.0, 12.0, 20.0, 3.0, 7.0, 15.0, 22.0, 9.0, 11.0];
         let events = vec![1, 1, 0, 1, 1, 0, 1, 1, 1, 0];
         // Binary treatment covariate
-        let x: Vec<Vec<f64>> = (0..10).map(|i| vec![if i < 5 { 0.0 } else { 1.0 }]).collect();
+        let x: Vec<Vec<f64>> = (0..10)
+            .map(|i| vec![if i < 5 { 0.0 } else { 1.0 }])
+            .collect();
         let cox = CoxPh::new()
             .with_feature_names(vec!["treatment".to_string()])
             .fit(&times, &events, &x)

@@ -4,6 +4,12 @@ All notable changes to `inferust` are documented here. This project follows sema
 
 ## [Unreleased]
 
+### Fixed
+
+- Relaxed the Kruskal-Wallis small-sample test expectation to the attainable chi-squared p-value for three groups of size three.
+- Stabilized the Shapiro-Wilk p-value approximation for small near-normal samples.
+- Added light diagonal regularization for Cox PH information-matrix solves in near-singular fixtures.
+
 ## [0.1.8] - 2026-05-01
 
 ### Added

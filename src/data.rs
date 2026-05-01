@@ -53,7 +53,9 @@ impl Formula {
 
         let response = lhs.trim();
         if response.is_empty() {
-            return Err(InferustError::InvalidInput("formula response cannot be empty".into()));
+            return Err(InferustError::InvalidInput(
+                "formula response cannot be empty".into(),
+            ));
         }
 
         let mut intercept = true;
@@ -67,7 +69,9 @@ impl Formula {
             let sub_parts: Vec<&str> = raw_token.split('-').collect();
             for (idx, part) in sub_parts.iter().enumerate() {
                 let tok = part.trim();
-                if tok.is_empty() { continue; }
+                if tok.is_empty() {
+                    continue;
+                }
                 if idx > 0 {
                     // This was after a `-`
                     if tok == "1" || tok == "0" {
@@ -103,9 +107,9 @@ impl Formula {
                     let a = a.trim().to_string();
                     let b = b.trim().to_string();
                     if a.is_empty() || b.is_empty() {
-                        return Err(InferustError::InvalidInput(
-                            format!("invalid interaction term `{tok}`"),
-                        ));
+                        return Err(InferustError::InvalidInput(format!(
+                            "invalid interaction term `{tok}`"
+                        )));
                     }
                     terms.push(FormulaTerm::Numeric(a.clone()));
                     terms.push(FormulaTerm::Numeric(b.clone()));
@@ -117,9 +121,9 @@ impl Formula {
                     let a = a.trim().to_string();
                     let b = b.trim().to_string();
                     if a.is_empty() || b.is_empty() {
-                        return Err(InferustError::InvalidInput(
-                            format!("invalid interaction term `{tok}`"),
-                        ));
+                        return Err(InferustError::InvalidInput(format!(
+                            "invalid interaction term `{tok}`"
+                        )));
                     }
                     terms.push(FormulaTerm::Interaction(a, b));
                     continue;
@@ -142,17 +146,24 @@ impl Formula {
             ));
         }
 
-        Ok(Self { response: response.to_string(), terms, intercept })
+        Ok(Self {
+            response: response.to_string(),
+            terms,
+            intercept,
+        })
     }
 
     /// Convenience: predictor column names (numeric + interaction, not offsets).
     pub fn predictor_names(&self) -> Vec<String> {
-        self.terms.iter().filter_map(|t| match t {
-            FormulaTerm::Numeric(n) => Some(n.clone()),
-            FormulaTerm::Categorical(n) => Some(format!("C({n})")),
-            FormulaTerm::Interaction(a, b) => Some(format!("{a}:{b}")),
-            FormulaTerm::Offset(_) => None,
-        }).collect()
+        self.terms
+            .iter()
+            .filter_map(|t| match t {
+                FormulaTerm::Numeric(n) => Some(n.clone()),
+                FormulaTerm::Categorical(n) => Some(format!("C({n})")),
+                FormulaTerm::Interaction(a, b) => Some(format!("{a}:{b}")),
+                FormulaTerm::Offset(_) => None,
+            })
+            .collect()
     }
 }
 
@@ -270,7 +281,9 @@ impl DataFrame {
                     } else {
                         let col_data = self.column(col)?;
                         predictor_names.push(col.clone());
-                        for row in 0..nrows { x[row].push(col_data[row]); }
+                        for row in 0..nrows {
+                            x[row].push(col_data[row]);
+                        }
                     }
                 }
                 FormulaTerm::Categorical(col) => {
@@ -280,7 +293,9 @@ impl DataFrame {
                     let col_a = self.column(a)?;
                     let col_b = self.column(b)?;
                     predictor_names.push(format!("{a}:{b}"));
-                    for row in 0..nrows { x[row].push(col_a[row] * col_b[row]); }
+                    for row in 0..nrows {
+                        x[row].push(col_a[row] * col_b[row]);
+                    }
                 }
                 FormulaTerm::Offset(col) => {
                     offset_col = Some(self.column(col)?.to_vec());
@@ -336,7 +351,9 @@ impl DataFrame {
     pub fn ols(&self, formula: &str) -> Result<OlsResult> {
         let d = self.design_matrices(formula)?;
         let mut builder = Ols::new().with_feature_names(d.predictor_names);
-        if !d.intercept { builder = builder.no_intercept(); }
+        if !d.intercept {
+            builder = builder.no_intercept();
+        }
         builder.fit(&d.x, &d.y)
     }
 
@@ -344,7 +361,9 @@ impl DataFrame {
     pub fn ols_with_categorical(&self, formula: &str, categorical: &[&str]) -> Result<OlsResult> {
         let d = self.design_matrices_with_categorical(formula, categorical)?;
         let mut builder = Ols::new().with_feature_names(d.predictor_names);
-        if !d.intercept { builder = builder.no_intercept(); }
+        if !d.intercept {
+            builder = builder.no_intercept();
+        }
         builder.fit(&d.x, &d.y)
     }
 
@@ -353,7 +372,9 @@ impl DataFrame {
         let d = self.design_matrices(formula)?;
         let wts = self.column(weights)?;
         let mut builder = Wls::new().with_feature_names(d.predictor_names);
-        if !d.intercept { builder = builder.no_intercept(); }
+        if !d.intercept {
+            builder = builder.no_intercept();
+        }
         builder.fit(&d.x, &d.y, wts)
     }
 
@@ -361,7 +382,9 @@ impl DataFrame {
     pub fn logistic(&self, formula: &str) -> Result<LogisticResult> {
         let d = self.design_matrices(formula)?;
         let mut builder = Logistic::new().with_feature_names(d.predictor_names);
-        if !d.intercept { builder = builder.no_intercept(); }
+        if !d.intercept {
+            builder = builder.no_intercept();
+        }
         builder.fit(&d.x, &d.y)
     }
 
@@ -372,7 +395,9 @@ impl DataFrame {
     pub fn poisson(&self, formula: &str) -> Result<PoissonResult> {
         let d = self.design_matrices(formula)?;
         let mut builder = Poisson::new().with_feature_names(d.predictor_names);
-        if !d.intercept { builder = builder.no_intercept(); }
+        if !d.intercept {
+            builder = builder.no_intercept();
+        }
         if let Some(offset) = d.offset {
             builder = builder.with_offset(offset);
         }
@@ -409,10 +434,13 @@ mod tests {
         let formula = Formula::parse("y ~ x1 + x2").unwrap();
         assert_eq!(formula.response, "y");
         assert!(formula.intercept);
-        assert_eq!(formula.terms, vec![
-            FormulaTerm::Numeric("x1".to_string()),
-            FormulaTerm::Numeric("x2".to_string()),
-        ]);
+        assert_eq!(
+            formula.terms,
+            vec![
+                FormulaTerm::Numeric("x1".to_string()),
+                FormulaTerm::Numeric("x2".to_string()),
+            ]
+        );
     }
 
     #[test]
@@ -425,7 +453,10 @@ mod tests {
     fn formula_interaction_colon() {
         use super::FormulaTerm;
         let f = Formula::parse("y ~ x1:x2").unwrap();
-        assert_eq!(f.terms, vec![FormulaTerm::Interaction("x1".into(), "x2".into())]);
+        assert_eq!(
+            f.terms,
+            vec![FormulaTerm::Interaction("x1".into(), "x2".into())]
+        );
     }
 
     #[test]
@@ -434,7 +465,9 @@ mod tests {
         let f = Formula::parse("y ~ x1 * x2").unwrap();
         assert!(f.terms.contains(&FormulaTerm::Numeric("x1".into())));
         assert!(f.terms.contains(&FormulaTerm::Numeric("x2".into())));
-        assert!(f.terms.contains(&FormulaTerm::Interaction("x1".into(), "x2".into())));
+        assert!(f
+            .terms
+            .contains(&FormulaTerm::Interaction("x1".into(), "x2".into())));
     }
 
     #[test]
