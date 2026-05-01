@@ -329,7 +329,7 @@ impl Plot {
 
         // Draw series
         for s in &self.series {
-            self.render_series(&mut svg, s, &sx, &sy, mt, ph, ml, pw);
+            self.render_series(&mut svg, s, &sx, &sy, pw);
         }
 
         // Axes labels
@@ -432,8 +432,8 @@ impl Plot {
         // Horizontal zero line
         if ymin <= 0.0 && ymax >= 0.0 {
             let r = row_of(0.0);
-            for c in 0..COLS {
-                grid[r][c] = '-';
+            for cell in &mut grid[r] {
+                *cell = '-';
             }
         }
 
@@ -463,8 +463,8 @@ impl Plot {
                         } else {
                             (baseline, top)
                         };
-                        for r in r0..=r1.min(ROWS - 1) {
-                            grid[r][c] = '|';
+                        for row in grid[r0..=r1.min(ROWS - 1)].iter_mut() {
+                            row[c] = '|';
                         }
                         if top < ROWS {
                             grid[top][c] = '#';
@@ -474,9 +474,9 @@ impl Plot {
                 Series::HLine { y, .. } => {
                     if *y >= ymin && *y <= ymax {
                         let r = row_of(*y);
-                        for c in 0..COLS {
-                            if grid[r][c] == ' ' {
-                                grid[r][c] = '.';
+                        for cell in &mut grid[r] {
+                            if *cell == ' ' {
+                                *cell = '.';
                             }
                         }
                     }
@@ -594,9 +594,6 @@ impl Plot {
         s: &Series,
         sx: &impl Fn(f64) -> f64,
         sy: &impl Fn(f64) -> f64,
-        _mt: f64,
-        _ph: f64,
-        _ml: f64,
         pw: f64,
     ) {
         match s {
