@@ -127,6 +127,26 @@ impl OlsResult {
             );
         }
         println!("───────────────────────────────────────────────────────────────────");
+        if let Ok(diagnostics) = self.diagnostics() {
+            println!(
+                " Durbin-Watson: {:>8.4}   Jarque-Bera: {:>10.4}   Prob(JB): {:>9.6}",
+                diagnostics.durbin_watson,
+                diagnostics.jarque_bera,
+                diagnostics.jarque_bera_p_value
+            );
+            println!(
+                " Skew          : {:>8.4}   Kurtosis    : {:>10.4}   Cond. No.: {:>9.4}",
+                diagnostics.skewness,
+                diagnostics.kurtosis,
+                diagnostics.condition_number
+            );
+            if diagnostics.condition_number > 30.0 {
+                println!(
+                    " Note: Large condition number may indicate multicollinearity or numerical instability."
+                );
+            }
+            println!("───────────────────────────────────────────────────────────────────");
+        }
         println!(" Significance codes:  *** p<0.001  ** p<0.01  * p<0.05  . p<0.1");
         println!("═══════════════════════════════════════════════════════════════════");
         println!();

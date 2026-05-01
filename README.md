@@ -15,7 +15,7 @@
 
 | Module | What you get | Python equivalent |
 |--------|-------------|-------------------|
-| `regression::Ols` / `Wls` / `Gls` / `Fgls` | OLS, weighted least squares, GLS with known covariance, and AR(1) feasible GLS with fast/stable solvers, robust/HAC SEs, confidence intervals, influence diagnostics, residual diagnostics, t/z stats, p-values, R², adj-R², F-stat, AIC, BIC | `statsmodels.OLS().fit()`, `statsmodels.WLS().fit()`, `statsmodels.GLS().fit()`, `statsmodels.GLSAR()` |
+| `regression::Ols` / `Wls` / `Gls` / `Fgls` | OLS, weighted least squares, GLS with known covariance, and AR(1) feasible GLS with fast/stable solvers, robust/HAC SEs, confidence intervals, influence diagnostics, residual diagnostics, Durbin-Watson, Jarque-Bera, condition numbers, t/z stats, p-values, R², adj-R², F-stat, AIC, BIC | `statsmodels.OLS().fit()`, `statsmodels.WLS().fit()`, `statsmodels.GLS().fit()`, `statsmodels.GLSAR()` |
 | `regression::RollingOls` / `RecursiveOls` | Rolling-window coefficient paths and recursive OLS with CUSUM stability diagnostics | `statsmodels.regression.rolling.RollingOLS`, `statsmodels.regression.recursive_ls.RecursiveLS` basics |
 | `hypothesis::ttest` | One-sample, two-sample Welch, paired t-tests with 95% CI | `scipy.stats.ttest_*` |
 | `hypothesis::chisq` | Goodness-of-fit and independence (contingency table) | `scipy.stats.chisquare`, `chi2_contingency` |
@@ -89,6 +89,10 @@ prior_gpa           8.166667    1.490421     5.4793   0.115581
  Significance codes:  *** p<0.001  ** p<0.01  * p<0.05  . p<0.1
 ═══════════════════════════════════════════════════════════════════
 ```
+
+The printed OLS/WLS summary also includes statsmodels-style residual diagnostics
+out of the box: Durbin-Watson, Jarque-Bera with `Prob(JB)`, residual skewness,
+kurtosis, and the design-matrix condition number.
 
 ### Formula-based fitting
 
@@ -353,7 +357,7 @@ match result {
 
 - [ ] Logistic regression (GLM with logit link)
 - [ ] Ridge / Lasso regularization
-- [ ] Durbin-Watson and Breusch-Pagan diagnostic tests
+- [x] Durbin-Watson and Breusch-Pagan diagnostic tests
 - [ ] Tukey HSD post-hoc test (after ANOVA)
 - [ ] Time-series: ARIMA / ACF / PACF
 - [ ] Weighted OLS
