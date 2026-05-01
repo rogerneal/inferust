@@ -4,57 +4,181 @@ use crate::error::{InferustError, Result};
 use crate::glm::{Logistic, LogisticResult, Poisson, PoissonResult};
 use crate::regression::{Ols, OlsResult, Wls};
 
-/// Parsed formula of the form `y ~ x1 + x2`.
+/// A parsed formula term — what appears between `+` / `-` signs in the RHS.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FormulaTerm {
+    /// Plain numeric predictor, e.g. `hours`.
+    Numeric(String),
+    /// Inline categorical expansion, e.g. `C(group)` — one-hot encodes the column.
+    Categorical(String),
+    /// Two-way interaction, e.g. `x1:x2` — adds x1 * x2 as a column.
+    Interaction(String, String),
+    /// Poisson/GLM offset term, e.g. `offset(exposure)` — added to linear predictor as-is.
+    Offset(String),
+}
+
+/// Parsed formula of the form `y ~ terms`.
+///
+/// Supported syntax:
+/// - `y ~ x1 + x2`                  — main effects with intercept
+/// - `y ~ x1 + x2 - 1`              — suppress intercept (`- 1` or `+ 0`)
+/// - `y ~ C(group) + x`             — inline one-hot encoding for `group`
+/// - `y ~ x1:x2`                    — interaction term (x1 × x2 column added)
+/// - `y ~ x1 * x2`                  — main effects + interaction (expands to `x1 + x2 + x1:x2`)
+/// - `y ~ x + offset(exposure)`     — exposure offset for Poisson/GLM models
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Formula {
+    /// Response variable name.
     pub response: String,
-    pub predictors: Vec<String>,
+    /// Ordered list of RHS terms after expansion.
+    pub terms: Vec<FormulaTerm>,
+    /// Whether an intercept should be included (default `true`; set `false` by `- 1` or `+ 0`).
+    pub intercept: bool,
 }
 
 impl Formula {
-    /// Parse a simple regression formula like `score ~ hours + gpa`.
+    /// Parse a formula string.
+    ///
+    /// # Examples
+    /// ```rust
+    /// use inferust::data::Formula;
+    ///
+    /// let f = Formula::parse("y ~ x1 + C(group) + x1:x2 - 1").unwrap();
+    /// assert!(!f.intercept);
+    /// ```
     pub fn parse(input: &str) -> Result<Self> {
         let (lhs, rhs) = input
             .split_once('~')
             .ok_or_else(|| InferustError::InvalidInput("formula must contain `~`".into()))?;
+
         let response = lhs.trim();
         if response.is_empty() {
+            return Err(InferustError::InvalidInput("formula response cannot be empty".into()));
+        }
+
+        let mut intercept = true;
+        let mut terms: Vec<FormulaTerm> = Vec::new();
+
+        // Tokenise the RHS by splitting on `+` first, then handling `-` as subtraction
+        // We split by `+` but also watch for tokens that start with `-`
+        for raw_token in rhs.split('+') {
+            // Each chunk may itself contain `- 1` or `- 0` at the end
+            // Split by `-` to find suppressed intercept tokens
+            let sub_parts: Vec<&str> = raw_token.split('-').collect();
+            for (idx, part) in sub_parts.iter().enumerate() {
+                let tok = part.trim();
+                if tok.is_empty() { continue; }
+                if idx > 0 {
+                    // This was after a `-`
+                    if tok == "1" || tok == "0" {
+                        intercept = false;
+                        continue;
+                    }
+                    // Negative term is unusual in standard formulas — skip with error
+                    return Err(InferustError::InvalidInput(
+                        format!("unsupported negative term `{tok}` — only `- 1` / `- 0` is supported to drop the intercept"),
+                    ));
+                }
+                // Positive token
+                if tok == "0" {
+                    intercept = false;
+                    continue;
+                }
+                if tok == "1" {
+                    // Explicit `+ 1` keeps intercept; just ignore
+                    continue;
+                }
+                // offset(col)
+                if let Some(inner) = strip_fn_call(tok, "offset") {
+                    terms.push(FormulaTerm::Offset(inner.to_string()));
+                    continue;
+                }
+                // C(col)
+                if let Some(inner) = strip_fn_call(tok, "C") {
+                    terms.push(FormulaTerm::Categorical(inner.to_string()));
+                    continue;
+                }
+                // x1 * x2  →  x1 + x2 + x1:x2
+                if let Some((a, b)) = tok.split_once('*') {
+                    let a = a.trim().to_string();
+                    let b = b.trim().to_string();
+                    if a.is_empty() || b.is_empty() {
+                        return Err(InferustError::InvalidInput(
+                            format!("invalid interaction term `{tok}`"),
+                        ));
+                    }
+                    terms.push(FormulaTerm::Numeric(a.clone()));
+                    terms.push(FormulaTerm::Numeric(b.clone()));
+                    terms.push(FormulaTerm::Interaction(a, b));
+                    continue;
+                }
+                // x1:x2
+                if let Some((a, b)) = tok.split_once(':') {
+                    let a = a.trim().to_string();
+                    let b = b.trim().to_string();
+                    if a.is_empty() || b.is_empty() {
+                        return Err(InferustError::InvalidInput(
+                            format!("invalid interaction term `{tok}`"),
+                        ));
+                    }
+                    terms.push(FormulaTerm::Interaction(a, b));
+                    continue;
+                }
+                // Plain numeric
+                terms.push(FormulaTerm::Numeric(tok.to_string()));
+            }
+        }
+
+        // Deduplicate while preserving order
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        terms.retain(|t| {
+            let key = format!("{t:?}");
+            seen.insert(key)
+        });
+
+        if terms.is_empty() && intercept {
             return Err(InferustError::InvalidInput(
-                "formula response cannot be empty".into(),
+                "formula must contain at least one predictor term".into(),
             ));
         }
 
-        let predictors = rhs
-            .split('+')
-            .map(str::trim)
-            .filter(|term| !term.is_empty())
-            .map(ToString::to_string)
-            .collect::<Vec<_>>();
-        if predictors.is_empty() {
-            return Err(InferustError::InvalidInput(
-                "formula must contain at least one predictor".into(),
-            ));
-        }
-        if predictors.iter().any(|term| term == "1") {
-            return Err(InferustError::InvalidInput(
-                "explicit intercept terms are not supported yet; intercept is added by model builders"
-                    .into(),
-            ));
-        }
+        Ok(Self { response: response.to_string(), terms, intercept })
+    }
 
-        Ok(Self {
-            response: response.to_string(),
-            predictors,
-        })
+    /// Convenience: predictor column names (numeric + interaction, not offsets).
+    pub fn predictor_names(&self) -> Vec<String> {
+        self.terms.iter().filter_map(|t| match t {
+            FormulaTerm::Numeric(n) => Some(n.clone()),
+            FormulaTerm::Categorical(n) => Some(format!("C({n})")),
+            FormulaTerm::Interaction(a, b) => Some(format!("{a}:{b}")),
+            FormulaTerm::Offset(_) => None,
+        }).collect()
     }
 }
 
-/// Built matrices from a formula and named columns.
+/// Strip `func(inner)` → `inner` if the token matches `func(...)`.
+fn strip_fn_call<'a>(tok: &'a str, func: &str) -> Option<&'a str> {
+    let prefix = format!("{func}(");
+    if tok.starts_with(prefix.as_str()) && tok.ends_with(')') {
+        Some(&tok[prefix.len()..tok.len() - 1])
+    } else {
+        None
+    }
+}
+
+/// Built design matrices from a formula and a [`DataFrame`].
 #[derive(Debug, Clone)]
 pub struct DesignMatrices {
+    /// Predictor matrix (n_obs × n_predictors), no intercept column.
     pub x: Vec<Vec<f64>>,
+    /// Response vector.
     pub y: Vec<f64>,
+    /// Human-readable names for each column in `x`.
     pub predictor_names: Vec<String>,
+    /// Whether the fitted model should include an intercept (from `Formula::intercept`).
+    pub intercept: bool,
+    /// Offset vector for GLM models (from `offset(...)` terms); `None` if not present.
+    pub offset: Option<Vec<f64>>,
 }
 
 /// Minimal named-column numeric data frame for formula-based fitting.
@@ -114,62 +238,52 @@ impl DataFrame {
             .ok_or_else(|| InferustError::InvalidInput(format!("unknown column `{name}`")))
     }
 
-    /// Build design matrices from a formula.
+    /// Build design matrices from a formula string.
+    ///
+    /// Supports all [`Formula`] syntax: `- 1`, `C(var)`, `x1:x2`, `x1*x2`, `offset(var)`.
     pub fn design_matrices(&self, formula: &str) -> Result<DesignMatrices> {
-        let formula = Formula::parse(formula)?;
-        let y = self.column(&formula.response)?.to_vec();
-        let predictor_columns = formula
-            .predictors
-            .iter()
-            .map(|name| self.column(name))
-            .collect::<Result<Vec<_>>>()?;
-
-        let nrows = self.nrows();
-        let mut x = Vec::with_capacity(nrows);
-        for row_idx in 0..nrows {
-            let row = predictor_columns
-                .iter()
-                .map(|column| column[row_idx])
-                .collect::<Vec<_>>();
-            x.push(row);
-        }
-
-        Ok(DesignMatrices {
-            x,
-            y,
-            predictor_names: formula.predictors,
-        })
+        self.design_matrices_with_categorical(formula, &[])
     }
 
-    /// Build design matrices with one-hot encoding for numeric-coded categorical columns.
-    /// The smallest sorted category is used as the reference level.
+    /// Build design matrices, treating columns in `categorical` as one-hot encoded
+    /// in addition to any `C(...)` terms in the formula.
+    ///
+    /// The smallest sorted category level is used as the reference (dropped) level.
     pub fn design_matrices_with_categorical(
         &self,
         formula: &str,
-        categorical: &[&str],
+        extra_categorical: &[&str],
     ) -> Result<DesignMatrices> {
-        let formula = Formula::parse(formula)?;
-        let y = self.column(&formula.response)?.to_vec();
+        let f = Formula::parse(formula)?;
+        let y = self.column(&f.response)?.to_vec();
         let nrows = self.nrows();
-        let mut x = vec![Vec::new(); nrows];
-        let mut predictor_names = Vec::new();
+        let mut x: Vec<Vec<f64>> = vec![Vec::new(); nrows];
+        let mut predictor_names: Vec<String> = Vec::new();
+        let mut offset_col: Option<Vec<f64>> = None;
 
-        for name in &formula.predictors {
-            let column = self.column(name)?;
-            if categorical.iter().any(|candidate| candidate == name) {
-                let mut levels = column.to_vec();
-                levels.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-                levels.dedup_by(|a, b| (*a - *b).abs() < f64::EPSILON);
-                for level in levels.iter().skip(1) {
-                    predictor_names.push(format!("{name}[T.{level}]"));
-                    for row_idx in 0..nrows {
-                        x[row_idx].push(f64::from((column[row_idx] - *level).abs() < f64::EPSILON));
+        for term in &f.terms {
+            match term {
+                FormulaTerm::Numeric(col) => {
+                    let is_cat = extra_categorical.iter().any(|&c| c == col.as_str());
+                    if is_cat {
+                        self.expand_categorical(col, nrows, &mut x, &mut predictor_names)?;
+                    } else {
+                        let col_data = self.column(col)?;
+                        predictor_names.push(col.clone());
+                        for row in 0..nrows { x[row].push(col_data[row]); }
                     }
                 }
-            } else {
-                predictor_names.push(name.clone());
-                for row_idx in 0..nrows {
-                    x[row_idx].push(column[row_idx]);
+                FormulaTerm::Categorical(col) => {
+                    self.expand_categorical(col, nrows, &mut x, &mut predictor_names)?;
+                }
+                FormulaTerm::Interaction(a, b) => {
+                    let col_a = self.column(a)?;
+                    let col_b = self.column(b)?;
+                    predictor_names.push(format!("{a}:{b}"));
+                    for row in 0..nrows { x[row].push(col_a[row] * col_b[row]); }
+                }
+                FormulaTerm::Offset(col) => {
+                    offset_col = Some(self.column(col)?.to_vec());
                 }
             }
         }
@@ -178,48 +292,91 @@ impl DataFrame {
             x,
             y,
             predictor_names,
+            intercept: f.intercept,
+            offset: offset_col,
         })
     }
 
-    /// Fit OLS with numeric-coded categorical predictors expanded to treatment dummies.
-    pub fn ols_with_categorical(&self, formula: &str, categorical: &[&str]) -> Result<OlsResult> {
-        let design = self.design_matrices_with_categorical(formula, categorical)?;
-        Ols::new()
-            .with_feature_names(design.predictor_names)
-            .fit(&design.x, &design.y)
+    /// One-hot expand a numeric-coded categorical column (reference = smallest level).
+    fn expand_categorical(
+        &self,
+        col: &str,
+        nrows: usize,
+        x: &mut Vec<Vec<f64>>,
+        names: &mut Vec<String>,
+    ) -> Result<()> {
+        let data = self.column(col)?;
+        let mut levels = data.to_vec();
+        levels.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        levels.dedup_by(|a, b| (*a - *b).abs() < f64::EPSILON);
+        for &level in levels.iter().skip(1) {
+            names.push(format!("{col}[T.{level}]"));
+            for row in 0..nrows {
+                x[row].push(f64::from((data[row] - level).abs() < f64::EPSILON));
+            }
+        }
+        Ok(())
     }
 
-    /// Fit OLS from a formula like `score ~ hours + gpa`.
+    /// Fit OLS from a formula.
+    ///
+    /// Supports all formula syntax including `- 1`, `C()`, `:`, `*`.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use inferust::data::DataFrame;
+    /// # let df = DataFrame::new();
+    /// // No intercept
+    /// let r = df.ols("y ~ x1 + x2 - 1");
+    /// // Interaction
+    /// let r = df.ols("y ~ x1 * x2");
+    /// // Inline categorical
+    /// let r = df.ols("y ~ C(group) + x1");
+    /// ```
     pub fn ols(&self, formula: &str) -> Result<OlsResult> {
-        let design = self.design_matrices(formula)?;
-        Ols::new()
-            .with_feature_names(design.predictor_names)
-            .fit(&design.x, &design.y)
+        let d = self.design_matrices(formula)?;
+        let mut builder = Ols::new().with_feature_names(d.predictor_names);
+        if !d.intercept { builder = builder.no_intercept(); }
+        builder.fit(&d.x, &d.y)
+    }
+
+    /// Fit OLS with explicit extra categorical columns (in addition to `C()` in the formula).
+    pub fn ols_with_categorical(&self, formula: &str, categorical: &[&str]) -> Result<OlsResult> {
+        let d = self.design_matrices_with_categorical(formula, categorical)?;
+        let mut builder = Ols::new().with_feature_names(d.predictor_names);
+        if !d.intercept { builder = builder.no_intercept(); }
+        builder.fit(&d.x, &d.y)
     }
 
     /// Fit WLS from a formula and a named weight column.
     pub fn wls(&self, formula: &str, weights: &str) -> Result<OlsResult> {
-        let design = self.design_matrices(formula)?;
-        let weights = self.column(weights)?;
-        Wls::new()
-            .with_feature_names(design.predictor_names)
-            .fit(&design.x, &design.y, weights)
+        let d = self.design_matrices(formula)?;
+        let wts = self.column(weights)?;
+        let mut builder = Wls::new().with_feature_names(d.predictor_names);
+        if !d.intercept { builder = builder.no_intercept(); }
+        builder.fit(&d.x, &d.y, wts)
     }
 
-    /// Fit binary logistic regression from a formula like `clicked ~ age + visits`.
+    /// Fit binary logistic regression from a formula.
     pub fn logistic(&self, formula: &str) -> Result<LogisticResult> {
-        let design = self.design_matrices(formula)?;
-        Logistic::new()
-            .with_feature_names(design.predictor_names)
-            .fit(&design.x, &design.y)
+        let d = self.design_matrices(formula)?;
+        let mut builder = Logistic::new().with_feature_names(d.predictor_names);
+        if !d.intercept { builder = builder.no_intercept(); }
+        builder.fit(&d.x, &d.y)
     }
 
-    /// Fit Poisson regression from a formula like `count ~ exposure + age`.
+    /// Fit Poisson regression from a formula.
+    ///
+    /// If the formula contains an `offset(col)` term, the column is added to the
+    /// linear predictor as a fixed offset (equivalent to statsmodels' `exposure`).
     pub fn poisson(&self, formula: &str) -> Result<PoissonResult> {
-        let design = self.design_matrices(formula)?;
-        Poisson::new()
-            .with_feature_names(design.predictor_names)
-            .fit(&design.x, &design.y)
+        let d = self.design_matrices(formula)?;
+        let mut builder = Poisson::new().with_feature_names(d.predictor_names);
+        if !d.intercept { builder = builder.no_intercept(); }
+        if let Some(offset) = d.offset {
+            builder = builder.with_offset(offset);
+        }
+        builder.fit(&d.x, &d.y)
     }
 }
 
@@ -248,9 +405,50 @@ mod tests {
 
     #[test]
     fn parses_basic_formula() {
+        use super::FormulaTerm;
         let formula = Formula::parse("y ~ x1 + x2").unwrap();
         assert_eq!(formula.response, "y");
-        assert_eq!(formula.predictors, vec!["x1", "x2"]);
+        assert!(formula.intercept);
+        assert_eq!(formula.terms, vec![
+            FormulaTerm::Numeric("x1".to_string()),
+            FormulaTerm::Numeric("x2".to_string()),
+        ]);
+    }
+
+    #[test]
+    fn formula_no_intercept() {
+        let f = Formula::parse("y ~ x1 + x2 - 1").unwrap();
+        assert!(!f.intercept);
+    }
+
+    #[test]
+    fn formula_interaction_colon() {
+        use super::FormulaTerm;
+        let f = Formula::parse("y ~ x1:x2").unwrap();
+        assert_eq!(f.terms, vec![FormulaTerm::Interaction("x1".into(), "x2".into())]);
+    }
+
+    #[test]
+    fn formula_star_expands_to_main_plus_interaction() {
+        use super::FormulaTerm;
+        let f = Formula::parse("y ~ x1 * x2").unwrap();
+        assert!(f.terms.contains(&FormulaTerm::Numeric("x1".into())));
+        assert!(f.terms.contains(&FormulaTerm::Numeric("x2".into())));
+        assert!(f.terms.contains(&FormulaTerm::Interaction("x1".into(), "x2".into())));
+    }
+
+    #[test]
+    fn formula_c_is_categorical() {
+        use super::FormulaTerm;
+        let f = Formula::parse("y ~ C(group) + x1").unwrap();
+        assert!(f.terms.contains(&FormulaTerm::Categorical("group".into())));
+    }
+
+    #[test]
+    fn formula_offset() {
+        use super::FormulaTerm;
+        let f = Formula::parse("y ~ x1 + offset(exposure)").unwrap();
+        assert!(f.terms.contains(&FormulaTerm::Offset("exposure".into())));
     }
 
     #[test]

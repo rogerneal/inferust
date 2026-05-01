@@ -246,6 +246,14 @@ pub enum OlsSolver {
 }
 
 /// Covariance estimator used for OLS coefficient inference.
+///
+/// # Choosing an estimator
+/// - [`Nonrobust`](OlsCovariance::Nonrobust) — classical OLS; assumes homoskedastic, serially
+///   uncorrelated errors.
+/// - [`Hc0`](OlsCovariance::Hc0)–[`Hc3`](OlsCovariance::Hc3) — White's HC family; robust to
+///   heteroskedasticity. `Hc1` is statsmodels' default for `HC1`.
+/// - [`Hac`](OlsCovariance::Hac) — Newey-West HAC; robust to both heteroskedasticity *and*
+///   serial autocorrelation. Choose `lags` using `floor(4 * (n/100)^(2/9))` or `floor(n^(1/3))`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OlsCovariance {
     /// Classical homoskedastic covariance estimator.
@@ -258,6 +266,11 @@ pub enum OlsCovariance {
     Hc2,
     /// HC0 adjusted by squared leverage: e_i^2 / (1 - h_i)^2.
     Hc3,
+    /// Newey-West heteroskedasticity and autocorrelation consistent (HAC) estimator.
+    ///
+    /// Uses the Bartlett kernel with the specified number of lags.
+    /// Appropriate when residuals may be serially correlated (e.g. time series data).
+    Hac { lags: usize },
 }
 
 impl OlsCovariance {
@@ -268,6 +281,7 @@ impl OlsCovariance {
             OlsCovariance::Hc1 => "HC1",
             OlsCovariance::Hc2 => "HC2",
             OlsCovariance::Hc3 => "HC3",
+            OlsCovariance::Hac { .. } => "HAC (Newey-West)",
         }
     }
 
@@ -343,6 +357,23 @@ impl Ols {
     /// Use HC1 robust standard errors, matching statsmodels' common robust default.
     pub fn robust(mut self) -> Self {
         self.covariance = OlsCovariance::Hc1;
+        self
+    }
+
+    /// Use Newey-West HAC standard errors with the given number of Bartlett lags.
+    ///
+    /// Appropriate for time series regressions where residuals may be serially
+    /// correlated.  A common rule-of-thumb for `lags` is `floor(n^(1/3))`.
+    ///
+    /// # Example
+    /// ```rust
+    /// use inferust::regression::Ols;
+    /// let x = vec![vec![1.0], vec![2.0], vec![3.0], vec![4.0], vec![5.0]];
+    /// let y = vec![2.1, 3.9, 6.2, 7.8, 10.1];
+    /// let result = Ols::new().hac(2).fit(&x, &y).unwrap();
+    /// ```
+    pub fn hac(mut self, lags: usize) -> Self {
+        self.covariance = OlsCovariance::Hac { lags };
         self
     }
 
@@ -422,6 +453,12 @@ impl Wls {
     /// Use HC1 robust standard errors.
     pub fn robust(mut self) -> Self {
         self.covariance = OlsCovariance::Hc1;
+        self
+    }
+
+    /// Use Newey-West HAC standard errors with the given number of Bartlett lags.
+    pub fn hac(mut self, lags: usize) -> Self {
+        self.covariance = OlsCovariance::Hac { lags };
         self
     }
 
@@ -751,6 +788,11 @@ fn coefficient_covariance(
         return xtx_inv * s2;
     }
 
+    // Newey-West HAC estimator
+    if let OlsCovariance::Hac { lags } = covariance {
+        return newey_west_covariance(x_mat, xtx_inv, residuals, lags);
+    }
+
     let n = x_mat.nrows();
     let ncols = x_mat.ncols();
     let mut meat = DMatrix::zeros(ncols, ncols);
@@ -758,7 +800,7 @@ fn coefficient_covariance(
     for i in 0..n {
         let denom = (1.0 - leverage[i]).max(f64::EPSILON);
         let weight = match covariance {
-            OlsCovariance::Nonrobust => unreachable!(),
+            OlsCovariance::Nonrobust | OlsCovariance::Hac { .. } => unreachable!(),
             OlsCovariance::Hc0 | OlsCovariance::Hc1 => residuals[i].powi(2),
             OlsCovariance::Hc2 => residuals[i].powi(2) / denom,
             OlsCovariance::Hc3 => residuals[i].powi(2) / denom.powi(2),
@@ -778,6 +820,53 @@ fn coefficient_covariance(
     };
 
     xtx_inv * meat * xtx_inv * scale
+}
+
+/// Newey-West HAC covariance matrix using the Bartlett kernel.
+///
+/// Ω_HAC = Σ_{t} xₜxₜ'eₜ²  +  Σ_{l=1}^{L} wₗ Σ_{t>l} ( xₜxₜ₋ₗ'eₜeₜ₋ₗ + xₜ₋ₗxₜ'eₜ₋ₗeₜ )
+/// where wₗ = 1 − l / (L + 1)  (Bartlett weights).
+///
+/// Returns (X'X)⁻¹ Ω_HAC (X'X)⁻¹.
+fn newey_west_covariance(
+    x_mat: &DMatrix<f64>,
+    xtx_inv: &DMatrix<f64>,
+    residuals: &[f64],
+    lags: usize,
+) -> DMatrix<f64> {
+    let n = x_mat.nrows();
+    let k = x_mat.ncols();
+
+    // Lag-0 (heteroskedasticity) term: Σ xₜxₜ'eₜ²
+    let mut meat = DMatrix::zeros(k, k);
+    for i in 0..n {
+        let e2 = residuals[i].powi(2);
+        for j in 0..k {
+            for l in 0..k {
+                meat[(j, l)] += e2 * x_mat[(i, j)] * x_mat[(i, l)];
+            }
+        }
+    }
+
+    // Lag-l cross terms with Bartlett weights
+    for lag in 1..=lags.min(n - 1) {
+        let w = 1.0 - lag as f64 / (lags as f64 + 1.0); // Bartlett weight
+        let mut gamma = DMatrix::zeros(k, k);
+        for t in lag..n {
+            let et = residuals[t];
+            let et_lag = residuals[t - lag];
+            for j in 0..k {
+                for l in 0..k {
+                    gamma[(j, l)] += x_mat[(t, j)] * x_mat[(t - lag, l)] * et * et_lag;
+                }
+            }
+        }
+        // Add symmetric contribution: γ(l) + γ(l)'
+        let gamma_t = gamma.transpose();
+        meat += (&gamma + &gamma_t) * w;
+    }
+
+    xtx_inv * meat * xtx_inv
 }
 
 #[cfg(test)]

@@ -1,14 +1,14 @@
 [package]
 name = "inferust"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
-description = "Statistical modeling for Rust — OLS regression, hypothesis tests, descriptive stats, and more. A statsmodels-style library."
+description = "Statistical modeling for Rust — OLS/WLS regression, GLM, survival analysis, ARIMA/VAR, nonparametric tests, and more. A statsmodels-style library."
 license = "MIT"
 repository = "https://github.com/rogerneal/inferust"
 homepage = "https://github.com/rogerneal/inferust"
 documentation = "https://docs.rs/inferust"
 readme = "README.md"
-keywords = ["statistics", "regression", "hypothesis-testing", "data-science", "ols"]
+keywords = ["statistics", "regression", "survival-analysis", "time-series", "statsmodels"]
 categories = ["science", "mathematics"]
 
 [[example]]

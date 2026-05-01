@@ -6,27 +6,37 @@
 //!
 //! | Module | Contents |
 //! |--------|---------|
-//! | [`regression`] | OLS/WLS with fast/stable solvers, robust SEs, confidence intervals, influence/residual diagnostics, and full summary output |
-//! | [`glm`] | Binary logistic and Poisson regression with Wald inference, covariance, residual diagnostics, likelihood-ratio tests, prediction intervals, classification metrics, and post-estimation helpers |
-//! | [`discrete`] | Probit, negative binomial, and multinomial logit starters |
-//! | [`glm_family`] | Generic Gaussian/Binomial/Poisson GLM front-end |
-//! | [`time_series`] | AR/ARIMA starters plus ACF, PACF, and Ljung-Box diagnostics |
+//! | [`regression`] | OLS/WLS with fast/stable/HAC solvers, HC0-HC3 and Newey-West SEs, confidence intervals, influence diagnostics, full summary |
+//! | [`glm`] | Binary logistic and Poisson regression with Wald inference, LRT, residual diagnostics, prediction intervals, classification metrics |
+//! | [`survival`] | Kaplan-Meier estimator, log-rank test, Cox proportional hazards regression |
+//! | [`time_series`] | Full ARIMA(p,d,q) via CSS, VAR, AR, ACF/PACF, Ljung-Box, ADF unit root, KPSS stationarity |
+//! | [`hypothesis`] | t-tests, chi-squared, ANOVA, Mann-Whitney U, Kruskal-Wallis, KS tests, Shapiro-Wilk |
 //! | [`diagnostics`] | VIF, Breusch-Pagan, White, and RESET diagnostics |
+//! | [`discrete`] | Probit, negative binomial, and multinomial logit |
+//! | [`glm_family`] | Generic Gaussian/Binomial/Poisson GLM front-end |
 //! | [`evaluation`] | Regression/classification metrics and bootstrap intervals |
 //! | [`robust`] | Huber robust linear regression |
-//! | [`gee`] | Independence-working-correlation GEE starters |
-//! | [`mixed`] | Random-intercept mixed linear model starter |
-//! | [`hypothesis`] | t-tests, chi-squared, one-way ANOVA |
+//! | [`gee`] | Independence-working-correlation GEE |
+//! | [`mixed`] | Random-intercept mixed linear model |
 //! | [`descriptive`] | Summary stats (mean, std, skewness, kurtosis, quartiles) |
-//! | [`data`] | Minimal named-column data frame and formula-based OLS/WLS/logistic/Poisson fitting |
+//! | [`data`] | Named-column DataFrame with formula API: `y ~ C(g) + x1*x2 - 1 + offset(e)` |
 //! | [`correlation`] | Pearson, Spearman, correlation matrices |
 //!
-//! ## OLS solver strategy
+//! ## OLS covariance options
 //!
-//! [`regression::Ols`] defaults to a fast Cholesky solve for full-rank,
-//! well-conditioned designs. Use `.stable()` or
-//! [`regression::OlsSolver::Svd`] when you prefer the more robust SVD path.
-//! Use `.robust()` or [`regression::OlsCovariance`] for HC robust inference.
+//! [`regression::Ols`] defaults to classical (homoskedastic) standard errors.
+//! Switch with `.robust()` (HC1), `.with_covariance(OlsCovariance::Hc3)`, or
+//! `.hac(lags)` (Newey-West) for time series regressions.
+//!
+//! ## Formula syntax
+//!
+//! [`data::DataFrame`] accepts R-style formulas:
+//! - `"y ~ x1 + x2"`            — main effects
+//! - `"y ~ x1 + x2 - 1"`        — no intercept
+//! - `"y ~ C(group) + x1"`      — inline one-hot encoding
+//! - `"y ~ x1:x2"`              — interaction term
+//! - `"y ~ x1 * x2"`            — main effects + interaction
+//! - `"y ~ x + offset(exp)"`    — Poisson offset
 //!
 //! ## Quick start
 //!
@@ -57,6 +67,7 @@ pub mod hypothesis;
 pub mod mixed;
 pub mod regression;
 pub mod robust;
+pub mod survival;
 pub mod time_series;
 
 pub use error::{InferustError, Result};

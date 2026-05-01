@@ -4,6 +4,38 @@ All notable changes to `inferust` are documented here. This project follows sema
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-01
+
+### Added
+
+#### Survival Analysis (`survival`)
+- **Kaplan-Meier estimator** with Greenwood confidence intervals, restricted mean survival time (RMST), and median survival time.
+- **Log-rank test** for comparing two survival curves (chi-squared statistic + p-value).
+- **Cox Proportional Hazards regression** via Newton-Raphson partial likelihood maximisation: coefficients, hazard ratios, standard errors, Wald z-statistics, p-values, HR confidence intervals, log-likelihood, and likelihood-ratio test.
+
+#### ARIMA / Time Series (`time_series`)
+- **Full ARIMA(p,d,q)** estimation via Conditional Sum of Squares (CSS) with Adam optimiser and finite-difference gradients; replaces prior AR-only stub.
+- `ArimaResult::forecast(history, steps)` with correct multi-level undifferencing using stored tails.
+- **VAR (Vector Autoregression)** for multivariate time series with `VarResult::forecast()`.
+- **ADF (Augmented Dickey-Fuller) unit-root test** with MacKinnon (1994) critical values and asymptotic p-value.
+- **KPSS stationarity test** (level and trend) with Bartlett-kernel long-run variance and Kwiatkowski (1992) critical values.
+
+#### Nonparametric Hypothesis Tests (`hypothesis::nonparametric`)
+- **Mann-Whitney U test** with normal approximation and tie correction.
+- **Kruskal-Wallis H test** with tie correction and chi-squared p-value.
+- **Kolmogorov-Smirnov one-sample test** (vs. N(μ,σ)) and **two-sample test** (Marsaglia asymptotic p-value).
+- **Shapiro-Wilk normality test** — Royston (1992) algorithm, valid for n = 3 … 5000.
+
+#### Newey-West HAC Standard Errors (`regression`)
+- `OlsCovariance::Hac { lags }` variant and `.hac(lags)` builder for both `Ols` and `Wls`.
+- Bartlett-kernel HAC sandwich estimator — suitable for autocorrelated residuals in time-series regressions.
+
+#### Formula API improvements (`data`)
+- `FormulaTerm` enum: `Numeric`, `Categorical`, `Interaction`, `Offset` — replacing the prior flat string list.
+- `Formula::parse()` supports: `C(var)` inline one-hot encoding; `x1:x2` interaction; `x1*x2` shorthand (main effects + interaction); `offset(var)` Poisson exposure; `- 1` / `+ 0` no-intercept; duplicate-term deduplication.
+- `DesignMatrices` carries `intercept: bool` and `offset: Option<Vec<f64>>` so downstream models consume them automatically.
+- `DataFrame::poisson()` now threads the offset through to `Poisson::with_offset()` when present.
+
 ## [0.1.6] - 2026-04-30
 
 ### Added
