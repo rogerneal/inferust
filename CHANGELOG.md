@@ -4,6 +4,8 @@ All notable changes to `inferust` are documented here. This project follows sema
 
 ## [Unreleased]
 
+## [0.1.12] - 2026-05-06
+
 ### Added
 
 - Added `formula!` macro for Rust-native formula strings such as `formula!(y ~ x1 + C(group))`.
