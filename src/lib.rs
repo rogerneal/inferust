@@ -6,14 +6,21 @@
 //!
 //! | Module | Contents |
 //! |--------|---------|
-//! | [`regression`] | OLS/WLS/GLS/FGLS plus rolling and recursive OLS with fast/stable/HAC solvers, HC0-HC3 and Newey-West SEs, confidence intervals, influence diagnostics, full summary |
+//! | [`regression`] | OLS/WLS/GLS/FGLS, quantile regression, plus rolling and recursive OLS with fast/stable/HAC solvers, HC0-HC3 and Newey-West SEs, confidence intervals, influence diagnostics, full summary |
 //! | [`glm`] | Binary logistic and Poisson regression with Wald inference, LRT, residual diagnostics, prediction intervals, classification metrics |
+//! | [`gam`] | Gaussian additive models with spline basis expansion |
+//! | [`gmm`] | Instrumental variables / 2SLS econometrics starter |
 //! | [`survival`] | Kaplan-Meier estimator, log-rank test, Cox proportional hazards regression |
+//! | [`statespace`] | Scalar Kalman filter and local-level state-space model |
 //! | [`time_series`] | ARIMA/SARIMA/SARIMAX via CSS, VAR/VECM/VARMAX, AR, ACF/PACF, Ljung-Box, ADF unit root, KPSS stationarity |
 //! | [`hypothesis`] | t-tests, chi-squared, ANOVA, Mann-Whitney U, Kruskal-Wallis, KS tests, Shapiro-Wilk |
+//! | [`contingency`] | 2x2 tables, odds/risk ratios, McNemar, CMH |
 //! | [`diagnostics`] | VIF, Breusch-Pagan, White, and RESET diagnostics |
-//! | [`discrete`] | Probit, negative binomial, and multinomial logit |
+//! | [`discrete`] | Probit, ordered logit, negative binomial, multinomial logit, and zero-inflated Poisson |
 //! | [`glm_family`] | Generic Gaussian/Binomial/Poisson GLM front-end |
+//! | [`multivariate`] | MANOVA and PCA starters |
+//! | [`imputation`] | Mean imputation and MICE-style chained equations |
+//! | [`treatment`] | Propensity scores, IPW treatment effects, and balance diagnostics |
 //! | [`evaluation`] | Regression/classification metrics and bootstrap intervals |
 //! | [`graphics`] | Dependency-light SVG plots for lines, scatter, residuals, and ACF bars |
 //! | [`plot`] | Full-featured SVG/ASCII plot builder: line, scatter, bar, step, band, ACF, survival, and residual charts |
@@ -38,6 +45,7 @@
 //! - `"y ~ C(group) + x1"`      — inline one-hot encoding
 //! - `"y ~ x1:x2"`              — interaction term
 //! - `"y ~ x1 * x2"`            — main effects + interaction
+//! - `"y ~ log(x) + sqrt(z)"`   — numeric transforms
 //! - `"y ~ x + offset(exp)"`    — Poisson offset
 //!
 //! For Rust-native ergonomics, the [`formula!`] macro turns formula-like tokens
@@ -63,6 +71,7 @@
 //!     .print_summary();
 //! ```
 
+pub mod contingency;
 pub mod correlation;
 pub mod data;
 pub mod descriptive;
@@ -70,17 +79,23 @@ pub mod diagnostics;
 pub mod discrete;
 pub mod error;
 pub mod evaluation;
+pub mod gam;
 pub mod gee;
 pub mod glm;
 pub mod glm_family;
+pub mod gmm;
 pub mod graphics;
 pub mod hypothesis;
+pub mod imputation;
 pub mod mixed;
+pub mod multivariate;
 pub mod plot;
 pub mod regression;
 pub mod robust;
+pub mod statespace;
 pub mod survival;
 pub mod time_series;
+pub mod treatment;
 
 pub use error::{InferustError, Result};
 

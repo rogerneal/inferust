@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use statrs::distribution::{Continuous, ContinuousCDF, Normal};
+use statrs::distribution::{Continuous, ContinuousCDF, Discrete, Normal, Poisson as StatPoisson};
 
 use crate::error::{InferustError, Result};
 use crate::glm::{Logistic, LogisticResult, Poisson, PoissonResult};
@@ -227,6 +227,7 @@ impl MultinomialLogit {
                 .collect::<Vec<_>>();
             let model = Logistic::new()
                 .with_feature_names(self.feature_names.clone())
+                .max_iter(500)
                 .fit(x, &binary)?;
             models.insert(*class, model);
         }
@@ -252,6 +253,201 @@ impl MultinomialLogitResult {
     }
 }
 
+/// Ordered logit starter result using cumulative binary logits.
+#[derive(Debug, Clone)]
+pub struct OrderedLogitResult {
+    pub classes: Vec<usize>,
+    pub cutpoints: Vec<f64>,
+    pub coefficients: Vec<f64>,
+    pub feature_names: Vec<String>,
+}
+
+/// Proportional-odds ordered logit starter.
+#[derive(Debug, Clone, Default)]
+pub struct OrderedLogit {
+    feature_names: Vec<String>,
+}
+
+impl OrderedLogit {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_feature_names(mut self, names: Vec<String>) -> Self {
+        self.feature_names = names;
+        self
+    }
+
+    /// Fits cumulative logits for `P(y <= class)` and averages slope terms
+    /// into a proportional-odds coefficient vector.
+    pub fn fit(&self, x: &[Vec<f64>], y: &[usize]) -> Result<OrderedLogitResult> {
+        validate_multiclass_x(x, y)?;
+        let mut classes = y.to_vec();
+        classes.sort_unstable();
+        classes.dedup();
+        if classes.len() < 3 {
+            return Err(InferustError::InvalidInput(
+                "ordered logit needs at least three ordered classes".into(),
+            ));
+        }
+
+        let mut cutpoints = Vec::with_capacity(classes.len() - 1);
+        let mut slope_sums = vec![0.0; x[0].len()];
+        for class in classes.iter().take(classes.len() - 1) {
+            let binary = y
+                .iter()
+                .map(|yi| f64::from(yi <= class))
+                .collect::<Vec<_>>();
+            let model = Logistic::new()
+                .with_feature_names(self.feature_names.clone())
+                .fit(x, &binary)?;
+            cutpoints.push(model.coefficients[0]);
+            for (sum, slope) in slope_sums.iter_mut().zip(model.coefficients.iter().skip(1)) {
+                *sum += -*slope;
+            }
+        }
+        let denom = (classes.len() - 1) as f64;
+        let coefficients = slope_sums
+            .into_iter()
+            .map(|value| value / denom)
+            .collect::<Vec<_>>();
+        let feature_names = if self.feature_names.is_empty() {
+            (0..x[0].len()).map(|i| format!("x{}", i + 1)).collect()
+        } else {
+            self.feature_names.clone()
+        };
+
+        Ok(OrderedLogitResult {
+            classes,
+            cutpoints,
+            coefficients,
+            feature_names,
+        })
+    }
+}
+
+impl OrderedLogitResult {
+    pub fn predict_proba(&self, x: &[Vec<f64>]) -> Vec<Vec<f64>> {
+        x.iter()
+            .map(|row| {
+                let eta = row
+                    .iter()
+                    .zip(self.coefficients.iter())
+                    .map(|(x, b)| x * b)
+                    .sum::<f64>();
+                let cumulative = self
+                    .cutpoints
+                    .iter()
+                    .map(|cut| logistic_cdf(cut - eta))
+                    .collect::<Vec<_>>();
+                let mut probabilities = Vec::with_capacity(self.classes.len());
+                probabilities.push(cumulative[0]);
+                for pair in cumulative.windows(2) {
+                    probabilities.push((pair[1] - pair[0]).max(0.0));
+                }
+                probabilities.push((1.0 - cumulative[cumulative.len() - 1]).max(0.0));
+                let total = probabilities.iter().sum::<f64>().max(1e-12);
+                probabilities.iter_mut().for_each(|p| *p /= total);
+                probabilities
+            })
+            .collect()
+    }
+}
+
+/// Zero-inflated Poisson starter result.
+#[derive(Debug, Clone)]
+pub struct ZeroInflatedPoissonResult {
+    pub count_model: PoissonResult,
+    pub inflation_model: LogisticResult,
+    pub fitted_means: Vec<f64>,
+    pub zero_probabilities: Vec<f64>,
+    pub log_likelihood: f64,
+}
+
+/// Zero-inflated Poisson count model with logit inflation.
+#[derive(Debug, Clone, Default)]
+pub struct ZeroInflatedPoisson {
+    feature_names: Vec<String>,
+    inflation_feature_names: Vec<String>,
+}
+
+impl ZeroInflatedPoisson {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_feature_names(mut self, names: Vec<String>) -> Self {
+        self.feature_names = names;
+        self
+    }
+
+    pub fn with_inflation_feature_names(mut self, names: Vec<String>) -> Self {
+        self.inflation_feature_names = names;
+        self
+    }
+
+    /// Fits a ZIP starter by combining a Poisson mean model with a logit model
+    /// for structural zeros.
+    pub fn fit(
+        &self,
+        x: &[Vec<f64>],
+        y: &[f64],
+        inflation_x: &[Vec<f64>],
+    ) -> Result<ZeroInflatedPoissonResult> {
+        if x.len() != y.len() || inflation_x.len() != y.len() {
+            return Err(InferustError::DimensionMismatch {
+                x_rows: x.len().max(inflation_x.len()),
+                y_len: y.len(),
+            });
+        }
+        if y.iter().any(|value| *value < 0.0 || !value.is_finite()) {
+            return Err(InferustError::InvalidInput(
+                "ZIP outcomes must be finite non-negative counts".into(),
+            ));
+        }
+        let count_model = Poisson::new()
+            .with_feature_names(self.feature_names.clone())
+            .fit(x, y)?;
+        let zero_indicator = y
+            .iter()
+            .map(|value| f64::from(*value == 0.0))
+            .collect::<Vec<_>>();
+        let inflation_model = Logistic::new()
+            .with_feature_names(self.inflation_feature_names.clone())
+            .fit(inflation_x, &zero_indicator)?;
+        let pi = inflation_model.predict_proba(inflation_x);
+        let mut fitted_means = Vec::with_capacity(y.len());
+        let mut zero_probabilities = Vec::with_capacity(y.len());
+        let mut log_likelihood = 0.0;
+        for ((&yi, &mu), &inflation) in y
+            .iter()
+            .zip(count_model.fitted_values.iter())
+            .zip(pi.iter())
+        {
+            let mu = mu.max(1e-12);
+            let inflation = inflation.clamp(1e-9, 1.0 - 1e-9);
+            let poisson = StatPoisson::new(mu)
+                .map_err(|_| InferustError::InvalidInput("invalid Poisson mean".into()))?;
+            fitted_means.push((1.0 - inflation) * mu);
+            let p0 = inflation + (1.0 - inflation) * poisson.pmf(0);
+            zero_probabilities.push(p0);
+            let prob = if yi == 0.0 {
+                p0
+            } else {
+                (1.0 - inflation) * poisson.pmf(yi as u64)
+            };
+            log_likelihood += prob.max(1e-12).ln();
+        }
+        Ok(ZeroInflatedPoissonResult {
+            count_model,
+            inflation_model,
+            fitted_means,
+            zero_probabilities,
+            log_likelihood,
+        })
+    }
+}
+
 fn validate_binary(x: &[Vec<f64>], y: &[f64]) -> Result<()> {
     if x.len() != y.len() {
         return Err(InferustError::DimensionMismatch {
@@ -263,6 +459,27 @@ fn validate_binary(x: &[Vec<f64>], y: &[f64]) -> Result<()> {
         return Err(InferustError::InvalidInput(
             "binary model requires 0/1 outcomes".into(),
         ));
+    }
+    Ok(())
+}
+
+fn validate_multiclass_x(x: &[Vec<f64>], y: &[usize]) -> Result<()> {
+    if x.len() != y.len() {
+        return Err(InferustError::DimensionMismatch {
+            x_rows: x.len(),
+            y_len: y.len(),
+        });
+    }
+    if x.is_empty() {
+        return Err(InferustError::InsufficientData { needed: 1, got: 0 });
+    }
+    let p = x[0].len();
+    for row in x {
+        if row.len() != p {
+            return Err(InferustError::InvalidInput(
+                "all rows in X must have the same length".into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -290,9 +507,13 @@ fn binary_log_likelihood(y: &[f64], probabilities: &[f64]) -> f64 {
         .sum()
 }
 
+fn logistic_cdf(value: f64) -> f64 {
+    1.0 / (1.0 + (-value).exp())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{MultinomialLogit, NegativeBinomial, Probit};
+    use super::{MultinomialLogit, NegativeBinomial, OrderedLogit, Probit, ZeroInflatedPoisson};
 
     #[test]
     fn probit_rejects_non_binary_y() {
@@ -358,5 +579,43 @@ mod tests {
         let fit = MultinomialLogit::new().fit(&x, &y).unwrap();
         let probs = fit.predict_proba(&x);
         assert_eq!(probs[0].len(), 3);
+    }
+
+    #[test]
+    fn ordered_logit_returns_ordered_probabilities() {
+        let x = (0..30).map(|i| vec![i as f64 / 10.0]).collect::<Vec<_>>();
+        let y = (0..30)
+            .map(|i| {
+                let score = i as f64 / 10.0 + ((i % 5) as f64 - 2.0) * 0.35;
+                if score < 1.1 {
+                    0
+                } else if score < 2.1 {
+                    1
+                } else {
+                    2
+                }
+            })
+            .collect::<Vec<_>>();
+        let result = OrderedLogit::new().fit(&x, &y).unwrap();
+        assert_eq!(result.cutpoints.len(), 2);
+        let probabilities = result.predict_proba(&[vec![0.0], vec![2.9]]);
+        assert!(probabilities[0][0] > probabilities[0][2]);
+        assert!(probabilities[1][2] > probabilities[1][0]);
+    }
+
+    #[test]
+    fn zero_inflated_poisson_fits_zero_probabilities() {
+        let x = (0..20).map(|i| vec![i as f64 / 10.0]).collect::<Vec<_>>();
+        let y = vec![
+            0.0, 0.0, 1.0, 0.0, 2.0, 0.0, 2.0, 3.0, 0.0, 4.0, 0.0, 5.0, 5.0, 0.0, 6.0, 7.0, 0.0,
+            8.0, 9.0, 0.0,
+        ];
+        let result = ZeroInflatedPoisson::new().fit(&x, &y, &x).unwrap();
+        assert_eq!(result.fitted_means.len(), y.len());
+        assert!(result
+            .zero_probabilities
+            .iter()
+            .all(|p| *p > 0.0 && *p < 1.0));
+        assert!(result.log_likelihood.is_finite());
     }
 }

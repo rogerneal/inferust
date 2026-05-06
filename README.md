@@ -15,16 +15,22 @@
 
 | Module | What you get | Python equivalent |
 |--------|-------------|-------------------|
-| `regression::Ols` / `Wls` / `Gls` / `Fgls` | OLS, weighted least squares, GLS with known covariance, and AR(1) feasible GLS with fast/stable solvers, robust/HAC SEs, confidence intervals, influence diagnostics, residual diagnostics, Durbin-Watson, Jarque-Bera, condition numbers, t/z stats, p-values, R², adj-R², F-stat, AIC, BIC | `statsmodels.OLS().fit()`, `statsmodels.WLS().fit()`, `statsmodels.GLS().fit()`, `statsmodels.GLSAR()` |
+| `regression::Ols` / `Wls` / `Gls` / `Fgls` / `QuantileRegression` | OLS, weighted least squares, GLS with known covariance, AR(1) feasible GLS, and quantile regression with fast/stable solvers, robust/HAC/cluster SEs, confidence intervals, influence diagnostics, residual diagnostics, Durbin-Watson, Jarque-Bera, condition numbers, t/z stats, p-values, R², adj-R², pseudo R¹, F-stat, AIC, BIC | `statsmodels.OLS().fit()`, `statsmodels.WLS().fit()`, `statsmodels.GLS().fit()`, `statsmodels.GLSAR()`, `statsmodels.QuantReg().fit()` |
 | `regression::RollingOls` / `RecursiveOls` | Rolling-window coefficient paths and recursive OLS with CUSUM stability diagnostics | `statsmodels.regression.rolling.RollingOLS`, `statsmodels.regression.recursive_ls.RecursiveLS` basics |
 | `hypothesis::ttest` | One-sample, two-sample Welch, paired t-tests with 95% CI | `scipy.stats.ttest_*` |
-| `hypothesis::chisq` | Goodness-of-fit and independence (contingency table) | `scipy.stats.chisquare`, `chi2_contingency` |
+| `hypothesis::chisq` / `contingency` | Goodness-of-fit, independence, 2x2 odds/risk ratios, McNemar, and CMH | `scipy.stats.chisquare`, `chi2_contingency`, `statsmodels.stats.contingency_tables` |
 | `hypothesis::anova` | One-way ANOVA table (SS, MS, F, p) | `scipy.stats.f_oneway` |
 | `descriptive::Summary` | mean, std, variance, min/max, quartiles, skewness, excess kurtosis | `pd.Series.describe()` |
-| `data::DataFrame` | named numeric/string columns, `formula!` macro, and formula-based OLS/WLS/logistic/Poisson fitting with categorical dummy expansion | `statsmodels.formula.api` basics |
+| `data::DataFrame` | named numeric/string columns, `formula!` macro, transforms, missing-row dropping, and formula-based OLS/WLS/quantile/logistic/Poisson fitting with categorical dummy expansion | `statsmodels.formula.api` basics |
 | `glm::Logistic` / `Poisson` | binary logistic and Poisson count regression with MLE estimates, Wald inference, covariance, residual diagnostics, likelihood-ratio tests, prediction intervals, classification metrics, and post-estimation helpers | `statsmodels.Logit().fit()`, `statsmodels.GLM(..., Poisson()).fit()` |
-| `discrete` | Probit, negative binomial, multinomial logit starters | `statsmodels.discrete` basics |
+| `gam::GaussianGam` | additive Gaussian regression with spline basis expansion and statsmodels-style OLS summaries on the expanded design | `statsmodels.gam.GLMGam` basics |
+| `gmm::Iv2Sls` | instrumental variables regression via two-stage least squares with t inference and summary output | `statsmodels.sandbox.regression.gmm.IV2SLS`, `statsmodels.gmm` basics |
+| `discrete` | Probit, ordered logit, negative binomial, multinomial logit, and zero-inflated Poisson starters | `statsmodels.discrete` basics |
 | `glm_family` | generic Gaussian/Binomial/Poisson GLM dispatch | `statsmodels.GLM` basics |
+| `multivariate` | one-way MANOVA and PCA starters | `statsmodels.multivariate` basics |
+| `imputation` | mean imputation and MICE-style chained equations | `statsmodels.imputation.mice` basics |
+| `treatment` | propensity scores, IPW ATE/ATT, and balance diagnostics | `statsmodels.treatment` basics |
+| `statespace` | scalar Kalman filter and local-level state-space smoothing/forecasting | `statsmodels.tsa.statespace` basics |
 | `time_series` | AR, ARIMA, SARIMA/SARIMAX, VAR, VECM, VARMAX starters plus ACF, PACF, Ljung-Box, ADF, and KPSS diagnostics | `statsmodels.tsa` basics |
 | `graphics` | dependency-light SVG line, scatter, residual, and ACF plots | `statsmodels.graphics` basics |
 | `diagnostics` | VIF, Breusch-Pagan, White, RESET diagnostics | `statsmodels.stats.diagnostic`, `outliers_influence` basics |
@@ -118,6 +124,10 @@ let frame = DataFrame::new()
 let result = frame.ols(inferust::formula!(score ~ hours + C(classroom))).unwrap();
 ```
 
+Formula transforms support `log(x)`, `sqrt(x)`, and `exp(x)`. Use
+`frame.drop_missing()` to remove rows containing `NaN` in numeric columns before
+building design matrices.
+
 For Polars users, collect a Utf8/Categorical column into `Vec<String>` or
 `Vec<&str>` and pass it to `with_categorical_column`; inferust keeps Polars
 optional rather than forcing it as a dependency.
@@ -134,6 +144,89 @@ let result = Wls::new()
     .unwrap();
 
 result.print_summary();
+```
+
+### Quantile regression
+
+```rust
+use inferust::regression::QuantileRegression;
+
+let result = QuantileRegression::new(0.5)
+    .with_feature_names(vec!["hours_studied".into(), "prior_gpa".into()])
+    .fit(&x, &y)
+    .unwrap();
+
+let intervals = result.confidence_intervals(0.05).unwrap();
+result.print_summary();
+```
+
+Formula users can call `frame.quantile("score ~ hours + gpa", 0.5)`, matching
+the common `statsmodels.formula.api.quantreg(...).fit(q=0.5)` workflow.
+
+### GAM, IV, and state-space starters
+
+```rust
+use inferust::gam::{GaussianGam, SplineTerm};
+
+let gam = GaussianGam::new()
+    .smooth(SplineTerm::cubic(0, vec![2.0, 4.0]).named("s(hours)"))
+    .fit(&x, &y)
+    .unwrap();
+
+let smooth_predictions = gam.predict(&x).unwrap();
+```
+
+```rust
+use inferust::gmm::Iv2Sls;
+
+let iv = Iv2Sls::new()
+    .with_feature_names(vec!["price".into()])
+    .fit(&x, &y, &instruments)
+    .unwrap();
+```
+
+```rust
+use inferust::statespace::LocalLevel;
+
+let state = LocalLevel::new(0.25, 0.05).fit(&y).unwrap();
+let next = state.forecast(3).unwrap();
+```
+
+### Discrete, multivariate, and treatment effects
+
+```rust
+use inferust::discrete::{OrderedLogit, ZeroInflatedPoisson};
+
+let ordered = OrderedLogit::new().fit(&x, &ordinal_y).unwrap();
+let category_probabilities = ordered.predict_proba(&x);
+
+let zip = ZeroInflatedPoisson::new().fit(&x, &counts, &inflation_x).unwrap();
+```
+
+```rust
+use inferust::multivariate::{one_way_manova, pca};
+
+let manova = one_way_manova(&[group_a, group_b]).unwrap();
+let pca_result = pca(&x).unwrap();
+let scores = pca_result.transform(&x, 2).unwrap();
+```
+
+```rust
+use inferust::treatment::{balance_diagnostics, PropensityScore};
+
+let balance = balance_diagnostics(&x, &treatment).unwrap();
+let effects = PropensityScore::new().ipw(&x, &treatment, &outcome).unwrap();
+```
+
+```rust
+use inferust::contingency::{mcnemar, odds_ratio_ci, table2x2};
+use inferust::imputation::MiceImputer;
+
+let effects = table2x2([[12.0, 5.0], [4.0, 20.0]]).unwrap();
+let interval = odds_ratio_ci([[12.0, 5.0], [4.0, 20.0]], 0.05).unwrap();
+let paired = mcnemar([[20.0, 12.0], [3.0, 25.0]], true).unwrap();
+
+let filled = MiceImputer::new().fit_transform(&possibly_missing).unwrap();
 ```
 
 ### GLS and rolling regression

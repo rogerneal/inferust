@@ -8,6 +8,17 @@ All notable changes to `inferust` are documented here. This project follows sema
 
 - Added `formula!` macro for Rust-native formula strings such as `formula!(y ~ x1 + C(group))`.
 - Added string categorical columns to `DataFrame` via `with_categorical_column` / `add_categorical_column`, with `C(column)` treatment-dummy expansion.
+- Added `regression::QuantileRegression` with IRLS fitting, asymptotic inference, pseudo R1, confidence intervals, summary output, prediction, and formula fitting via `DataFrame::quantile`.
+- Added `statespace` with scalar Kalman filtering and a local-level state-space model.
+- Added `gam::GaussianGam` with spline-basis additive regression.
+- Added `gmm::Iv2Sls` for instrumental-variables / two-stage least-squares regression.
+- Added ordered logit and zero-inflated Poisson starters to `discrete`.
+- Added `multivariate` with one-way MANOVA and PCA starters.
+- Added `treatment` with propensity-score IPW treatment effects and balance diagnostics.
+- Added `imputation::MiceImputer` with mean imputation and chained-equation regression passes.
+- Added `contingency` with 2x2 odds/risk ratios, odds-ratio intervals, McNemar, and Cochran-Mantel-Haenszel.
+- Added one-way cluster-robust covariance for `Ols` and `Wls`.
+- Added formula transforms (`log`, `sqrt`, `exp`) and `DataFrame::drop_missing()`.
 
 ## [0.1.10] - 2026-05-01
 

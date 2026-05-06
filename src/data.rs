@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::error::{InferustError, Result};
 use crate::glm::{Logistic, LogisticResult, Poisson, PoissonResult};
-use crate::regression::{Ols, OlsResult, Wls};
+use crate::regression::{Ols, OlsResult, QuantileRegression, QuantileRegressionResult, Wls};
 
 /// A parsed formula term — what appears between `+` / `-` signs in the RHS.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +13,8 @@ pub enum FormulaTerm {
     Categorical(String),
     /// Two-way interaction, e.g. `x1:x2` — adds x1 * x2 as a column.
     Interaction(String, String),
+    /// Numeric transform, e.g. `log(income)`.
+    Transform(String, String),
     /// Poisson/GLM offset term, e.g. `offset(exposure)` — added to linear predictor as-is.
     Offset(String),
 }
@@ -25,6 +27,7 @@ pub enum FormulaTerm {
 /// - `y ~ C(group) + x`             — inline one-hot encoding for `group`
 /// - `y ~ x1:x2`                    — interaction term (x1 × x2 column added)
 /// - `y ~ x1 * x2`                  — main effects + interaction (expands to `x1 + x2 + x1:x2`)
+/// - `y ~ log(x) + sqrt(z)`         — simple numeric transforms
 /// - `y ~ x + offset(exposure)`     — exposure offset for Poisson/GLM models
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Formula {
@@ -102,6 +105,10 @@ impl Formula {
                     terms.push(FormulaTerm::Categorical(inner.to_string()));
                     continue;
                 }
+                if let Some((func, inner)) = parse_transform(tok) {
+                    terms.push(FormulaTerm::Transform(func.to_string(), inner.to_string()));
+                    continue;
+                }
                 // x1 * x2  →  x1 + x2 + x1:x2
                 if let Some((a, b)) = tok.split_once('*') {
                     let a = a.trim().to_string();
@@ -161,6 +168,7 @@ impl Formula {
                 FormulaTerm::Numeric(n) => Some(n.clone()),
                 FormulaTerm::Categorical(n) => Some(format!("C({n})")),
                 FormulaTerm::Interaction(a, b) => Some(format!("{a}:{b}")),
+                FormulaTerm::Transform(func, n) => Some(format!("{func}({n})")),
                 FormulaTerm::Offset(_) => None,
             })
             .collect()
@@ -179,6 +187,15 @@ fn strip_fn_call<'a>(tok: &'a str, func: &str) -> Option<&'a str> {
     } else {
         None
     }
+}
+
+fn parse_transform(tok: &str) -> Option<(&'static str, &str)> {
+    for func in ["log", "sqrt", "exp"] {
+        if let Some(inner) = strip_fn_call(tok, func) {
+            return Some((func, inner));
+        }
+    }
+    None
 }
 
 /// Built design matrices from a formula and a [`DataFrame`].
@@ -368,6 +385,13 @@ impl DataFrame {
                         x[row].push(col_a[row] * col_b[row]);
                     }
                 }
+                FormulaTerm::Transform(func, col) => {
+                    let values = self.transformed_column(func, col)?;
+                    predictor_names.push(format!("{func}({col})"));
+                    for row in 0..nrows {
+                        x[row].push(values[row]);
+                    }
+                }
                 FormulaTerm::Offset(col) => {
                     offset_col = Some(self.column(col)?.to_vec());
                 }
@@ -422,6 +446,58 @@ impl DataFrame {
         )))
     }
 
+    fn transformed_column(&self, func: &str, col: &str) -> Result<Vec<f64>> {
+        let values = self.column(col)?;
+        values
+            .iter()
+            .map(|value| match func {
+                "log" => {
+                    if *value <= 0.0 {
+                        Err(InferustError::InvalidInput(format!(
+                            "log({col}) requires positive values"
+                        )))
+                    } else {
+                        Ok(value.ln())
+                    }
+                }
+                "sqrt" => {
+                    if *value < 0.0 {
+                        Err(InferustError::InvalidInput(format!(
+                            "sqrt({col}) requires non-negative values"
+                        )))
+                    } else {
+                        Ok(value.sqrt())
+                    }
+                }
+                "exp" => Ok(value.exp()),
+                other => Err(InferustError::InvalidInput(format!(
+                    "unsupported transform `{other}`"
+                ))),
+            })
+            .collect()
+    }
+
+    /// Drop rows containing `NaN` in any numeric column.
+    ///
+    /// Categorical columns are filtered to the same retained rows.
+    pub fn drop_missing(&self) -> Result<Self> {
+        let nrows = self.nrows();
+        let keep = (0..nrows)
+            .filter(|row| self.columns.values().all(|col| !col[*row].is_nan()))
+            .collect::<Vec<_>>();
+        let mut out = DataFrame::new();
+        for (name, values) in &self.columns {
+            out.add_column(name.clone(), keep.iter().map(|&i| values[i]).collect())?;
+        }
+        for (name, values) in &self.categorical_columns {
+            out.add_categorical_column(
+                name.clone(),
+                keep.iter().map(|&i| values[i].clone()).collect::<Vec<_>>(),
+            )?;
+        }
+        Ok(out)
+    }
+
     /// Fit OLS from a formula.
     ///
     /// Supports all formula syntax including `- 1`, `C()`, `:`, `*`.
@@ -465,6 +541,19 @@ impl DataFrame {
             builder = builder.no_intercept();
         }
         builder.fit(&d.x, &d.y, wts)
+    }
+
+    /// Fit quantile regression from a formula.
+    ///
+    /// `quantile = 0.5` gives median regression, comparable to
+    /// `statsmodels.formula.api.quantreg("y ~ x", data).fit(q=0.5)`.
+    pub fn quantile(&self, formula: &str, quantile: f64) -> Result<QuantileRegressionResult> {
+        let d = self.design_matrices(formula)?;
+        let mut builder = QuantileRegression::new(quantile).with_feature_names(d.predictor_names);
+        if !d.intercept {
+            builder = builder.no_intercept();
+        }
+        builder.fit(&d.x, &d.y)
     }
 
     /// Fit binary logistic regression from a formula.
@@ -581,12 +670,50 @@ mod tests {
     }
 
     #[test]
+    fn formula_transform() {
+        use super::FormulaTerm;
+        let f = Formula::parse("y ~ log(x1) + sqrt(x2)").unwrap();
+        assert!(f
+            .terms
+            .contains(&FormulaTerm::Transform("log".into(), "x1".into())));
+        assert!(f
+            .terms
+            .contains(&FormulaTerm::Transform("sqrt".into(), "x2".into())));
+    }
+
+    #[test]
     fn builds_design_matrices_from_named_columns() {
         let design = frame().design_matrices("y ~ x1 + x2").unwrap();
         assert_eq!(design.predictor_names, vec!["x1", "x2"]);
         assert_eq!(design.y[0], 5.1);
         assert_eq!(design.x[0], vec![1.0, 2.0]);
         assert_eq!(design.x[5], vec![6.0, 7.0]);
+    }
+
+    #[test]
+    fn design_matrices_support_transforms() {
+        let design = frame().design_matrices("y ~ log(x1) + sqrt(x2)").unwrap();
+        assert_eq!(design.predictor_names, vec!["log(x1)", "sqrt(x2)"]);
+        assert_close(design.x[0][0], 0.0, 1e-12);
+        assert_close(design.x[0][1], 2.0_f64.sqrt(), 1e-12);
+    }
+
+    #[test]
+    fn drop_missing_removes_nan_numeric_rows() {
+        let frame = DataFrame::new()
+            .with_column("x", vec![1.0, f64::NAN, 3.0])
+            .unwrap()
+            .with_column("y", vec![2.0, 4.0, 6.0])
+            .unwrap()
+            .with_categorical_column("g", vec!["a", "b", "c"])
+            .unwrap();
+        let cleaned = frame.drop_missing().unwrap();
+        assert_eq!(cleaned.nrows(), 2);
+        assert_eq!(cleaned.column("x").unwrap(), &[1.0, 3.0]);
+        assert_eq!(
+            cleaned.categorical_column("g").unwrap(),
+            &["a".to_string(), "c".to_string()]
+        );
     }
 
     #[test]
@@ -652,6 +779,19 @@ mod tests {
         assert_close(result.coefficients[1], 1.6265313140792843, 1e-10);
         assert_close(result.coefficients[2], 1.139502728692733, 1e-10);
         assert_eq!(result.feature_names, vec!["const", "x1", "x2"]);
+    }
+
+    #[test]
+    fn formula_quantile_fits_named_columns() {
+        let frame = DataFrame::new()
+            .with_column("x", vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0])
+            .unwrap()
+            .with_column("y", vec![1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0, 60.0])
+            .unwrap();
+        let result = frame.quantile("y ~ x", 0.5).unwrap();
+        assert_close(result.coefficients[0], 1.0, 1e-3);
+        assert_close(result.coefficients[1], 2.0, 1e-3);
+        assert_eq!(result.feature_names, vec!["const", "x"]);
     }
 
     #[test]

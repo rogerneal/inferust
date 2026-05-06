@@ -270,7 +270,7 @@ pub enum OlsSolver {
 ///   heteroskedasticity. `Hc1` is statsmodels' default for `HC1`.
 /// - [`Hac`](OlsCovariance::Hac) — Newey-West HAC; robust to both heteroskedasticity *and*
 ///   serial autocorrelation. Choose `lags` using `floor(4 * (n/100)^(2/9))` or `floor(n^(1/3))`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OlsCovariance {
     /// Classical homoskedastic covariance estimator.
     Nonrobust,
@@ -287,10 +287,12 @@ pub enum OlsCovariance {
     /// Uses the Bartlett kernel with the specified number of lags.
     /// Appropriate when residuals may be serially correlated (e.g. time series data).
     Hac { lags: usize },
+    /// One-way cluster-robust sandwich covariance.
+    Cluster { groups: Vec<usize> },
 }
 
 impl OlsCovariance {
-    fn label(self) -> &'static str {
+    fn label(&self) -> &'static str {
         match self {
             OlsCovariance::Nonrobust => "nonrobust",
             OlsCovariance::Hc0 => "HC0",
@@ -298,10 +300,11 @@ impl OlsCovariance {
             OlsCovariance::Hc2 => "HC2",
             OlsCovariance::Hc3 => "HC3",
             OlsCovariance::Hac { .. } => "HAC (Newey-West)",
+            OlsCovariance::Cluster { .. } => "cluster",
         }
     }
 
-    fn uses_t_distribution(self) -> bool {
+    fn uses_t_distribution(&self) -> bool {
         matches!(self, OlsCovariance::Nonrobust)
     }
 }
@@ -393,6 +396,12 @@ impl Ols {
         self
     }
 
+    /// Use one-way cluster-robust standard errors.
+    pub fn cluster_robust(mut self, groups: Vec<usize>) -> Self {
+        self.covariance = OlsCovariance::Cluster { groups };
+        self
+    }
+
     /// Fit without an intercept (forces regression through the origin).
     pub fn no_intercept(mut self) -> Self {
         self.add_intercept = false;
@@ -411,7 +420,7 @@ impl Ols {
             weights: None,
             add_intercept: self.add_intercept,
             solver: self.solver,
-            covariance: self.covariance,
+            covariance: self.covariance.clone(),
             feature_names: &self.feature_names,
         })
     }
@@ -478,6 +487,12 @@ impl Wls {
         self
     }
 
+    /// Use one-way cluster-robust standard errors.
+    pub fn cluster_robust(mut self, groups: Vec<usize>) -> Self {
+        self.covariance = OlsCovariance::Cluster { groups };
+        self
+    }
+
     /// Fit without an intercept (forces regression through the origin).
     pub fn no_intercept(mut self) -> Self {
         self.add_intercept = false;
@@ -493,7 +508,7 @@ impl Wls {
             weights: Some(weights),
             add_intercept: self.add_intercept,
             solver: self.solver,
-            covariance: self.covariance,
+            covariance: self.covariance.clone(),
             feature_names: &self.feature_names,
         })
     }
@@ -618,9 +633,31 @@ fn fit_linear_model(spec: FitSpec<'_>) -> Result<OlsResult> {
     let s2 = ssr / df_resid as f64;
     let r_squared = if sst == 0.0 { 1.0 } else { 1.0 - ssr / sst };
     let adj_r_squared = 1.0 - (1.0 - r_squared) * (n - 1) as f64 / df_resid as f64;
+    if let OlsCovariance::Cluster { groups } = &covariance {
+        if groups.len() != n {
+            return Err(InferustError::DimensionMismatch {
+                x_rows: groups.len(),
+                y_len: n,
+            });
+        }
+        let mut unique = groups.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        if unique.len() < 2 {
+            return Err(InferustError::InvalidInput(
+                "cluster-robust covariance needs at least two clusters".into(),
+            ));
+        }
+    }
 
     let cov_beta = coefficient_covariance(
-        covariance, &x_fit, &xtx_inv, &residuals, &leverage, s2, df_resid,
+        covariance.clone(),
+        &x_fit,
+        &xtx_inv,
+        &residuals,
+        &leverage,
+        s2,
+        df_resid,
     );
     let std_errors: Vec<f64> = (0..ncols).map(|i| cov_beta[(i, i)].sqrt()).collect();
     let coefficients: Vec<f64> = beta.iter().cloned().collect();
@@ -808,6 +845,9 @@ fn coefficient_covariance(
     if let OlsCovariance::Hac { lags } = covariance {
         return newey_west_covariance(x_mat, xtx_inv, residuals, lags);
     }
+    if let OlsCovariance::Cluster { groups } = covariance {
+        return cluster_covariance(x_mat, xtx_inv, residuals, &groups, df_resid);
+    }
 
     let n = x_mat.nrows();
     let ncols = x_mat.ncols();
@@ -816,7 +856,9 @@ fn coefficient_covariance(
     for i in 0..n {
         let denom = (1.0 - leverage[i]).max(f64::EPSILON);
         let weight = match covariance {
-            OlsCovariance::Nonrobust | OlsCovariance::Hac { .. } => unreachable!(),
+            OlsCovariance::Nonrobust
+            | OlsCovariance::Hac { .. }
+            | OlsCovariance::Cluster { .. } => unreachable!(),
             OlsCovariance::Hc0 | OlsCovariance::Hc1 => residuals[i].powi(2),
             OlsCovariance::Hc2 => residuals[i].powi(2) / denom,
             OlsCovariance::Hc3 => residuals[i].powi(2) / denom.powi(2),
@@ -883,6 +925,42 @@ fn newey_west_covariance(
     }
 
     xtx_inv * meat * xtx_inv
+}
+
+/// One-way cluster-robust covariance matrix.
+fn cluster_covariance(
+    x_mat: &DMatrix<f64>,
+    xtx_inv: &DMatrix<f64>,
+    residuals: &[f64],
+    groups: &[usize],
+    df_resid: usize,
+) -> DMatrix<f64> {
+    let n = x_mat.nrows();
+    let k = x_mat.ncols();
+    if groups.len() != n {
+        return xtx_inv.clone() * f64::NAN;
+    }
+    let mut unique = groups.to_vec();
+    unique.sort_unstable();
+    unique.dedup();
+    let g = unique.len();
+    if g < 2 {
+        return xtx_inv.clone() * f64::NAN;
+    }
+    let mut meat = DMatrix::zeros(k, k);
+    for cluster in unique {
+        let mut score = DVector::<f64>::zeros(k);
+        for i in 0..n {
+            if groups[i] == cluster {
+                for j in 0..k {
+                    score[j] += x_mat[(i, j)] * residuals[i];
+                }
+            }
+        }
+        meat += &score * score.transpose();
+    }
+    let correction = (g as f64 / (g - 1) as f64) * ((n - 1) as f64 / df_resid.max(1) as f64);
+    xtx_inv * meat * xtx_inv * correction
 }
 
 #[cfg(test)]
@@ -1059,6 +1137,16 @@ mod tests {
                 assert_close(*actual_high, expected_high, 1e-10);
             }
         }
+    }
+
+    #[test]
+    fn cluster_robust_covariance_runs() {
+        let (x, y) = fixture();
+        let clusters = vec![0, 0, 1, 1, 2, 2];
+        let result = Ols::new().cluster_robust(clusters).fit(&x, &y).unwrap();
+        assert_eq!(result.covariance.label(), "cluster");
+        assert_eq!(result.std_errors.len(), result.coefficients.len());
+        assert!(result.std_errors.iter().all(|se| se.is_finite()));
     }
 
     #[test]
