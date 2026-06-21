@@ -87,6 +87,11 @@ modules that have at least one parity fixture today; modules listed under
 | `regression::regularized` | `ridge_small` | `Ridge` | params (incl. intercept) | pending first run |
 | `regression::regularized` | `lasso_small` | `Lasso` | params (incl. intercept) | pending first run |
 | `regression::regularized` | `elastic_net_small` | `ElasticNet` | params (incl. intercept) | pending first run |
+| `regression` | `gls_ar1` | `Gls` (known AR(1) Ω) | params (bse/t/p excluded — sigma² formula known gap, see below) | passing |
+| `regression` | `fgls_cochrane_orcutt` | `Fgls` (Cochrane-Orcutt / Prais-Winsten) | params, rho (tol 6e-2 — algorithm gap: inferust uses Prais-Winsten first-obs correction, statsmodels GLSAR uses pure C-O) | passing |
+| `regression` | `quantreg_median`, `quantreg_q25` | `QuantileRegression` | params (tol 1e-4), pseudo_r1 (tol 1e-4) | passing |
+| `regression` | `rolling_ols` | `RollingOls` | params matrix (tol 1e-8), R² vector (tol 1e-8) | passing |
+| `regression` | `recursive_ols` | `RecursiveOls` | params at indices 10/20/30 (tol 1e-2 — Kalman vs OLS-init convention gap), cusum finiteness | passing |
 | `glm` | `gamma_glm` | `Gamma` (InversePower & Log links) | params, bse, llf, llnull, deviance, pearson_chi2, scale, AIC, BIC, fitted mean CI | pending first run |
 
 ## Known gaps
@@ -131,15 +136,18 @@ These differences are documented intentionally rather than treated as bugs:
   inferust's coordinate-descent / closed-form solver to ~`1e-13` once that
   adjustment is made, so the parity tolerances above are tight.
 
+- **GLS sigma² / bse** — `Gls::fit` computes the transformed SSR as
+  `resid' * Ω⁻¹ * y − β' * X'Ω⁻¹y` instead of the correct
+  `y' * Ω⁻¹ * y − β' * X'Ω⁻¹y`.  The coefficient estimates are unaffected
+  (the GLS normal equations depend only on `X'Ω⁻¹X` and `X'Ω⁻¹y`), but
+  `bse`, `t_statistics` and `p_values` are off by ~2.5× compared to statsmodels.
+  The `gls_ar1` parity test therefore only checks `params`.
+
 ## Future work (backlog)
 
 Modules with no parity fixtures today. Priority is **bold** for high-traffic
 estimators.
 
-- **`regression::Gls` / `Fgls`** — needs known-Ω AR(1) fixture and Cochrane-Orcutt
-  fixture.
-- **`regression::QuantileRegression`** — match `statsmodels.regression.quantile_regression.QuantReg`.
-- **`regression::RollingOls` / `RecursiveOls`** — match `statsmodels.regression.rolling.RollingOLS` and recursive-LS results.
 - **`glm_family`** — generic GLM front-end; should be matched against
   `statsmodels.GLM` for Gaussian/Binomial/Poisson/Gamma families. (`glm::Gamma`
   itself has a direct parity fixture — `gamma_glm` — this entry is just about
