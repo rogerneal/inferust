@@ -2,8 +2,12 @@
 
 mod common;
 
-use common::{as_f64, as_f64_matrix, as_f64_vec, assert_parity, check_scalar, check_vec, load_fixture, xy};
-use inferust::hypothesis::{adjust, anova, chisq, nonparametric, tukey_hsd, ttest, MultiTestMethod};
+use common::{
+    as_f64, as_f64_matrix, as_f64_vec, assert_parity, check_scalar, check_vec, load_fixture, xy,
+};
+use inferust::hypothesis::{
+    adjust, anova, chisq, nonparametric, ttest, tukey_hsd, MultiTestMethod,
+};
 use inferust::regression::Ols;
 
 #[test]
@@ -109,8 +113,8 @@ fn parity_mann_whitney() {
     let expected_u = as_f64(&fx["u_statistic"]);
     let actual_u = result.u_statistic;
     // inferust returns min(U1, U2); scipy can return either side. Accept both.
-    let u_match = (actual_u - expected_u).abs() < 1e-8
-        || (actual_u - (u_max - expected_u)).abs() < 1e-8;
+    let u_match =
+        (actual_u - expected_u).abs() < 1e-8 || (actual_u - (u_max - expected_u)).abs() < 1e-8;
 
     let mut checks = vec![check_scalar(
         "pvalue",
@@ -271,18 +275,18 @@ fn parity_wald_ols() {
                 as_f64(&fx["f_statistic"]),
                 1e-6,
             ),
-            check_scalar(
-                "f_pvalue",
-                wald.f_p_value,
-                as_f64(&fx["f_pvalue"]),
-                1e-7,
-            ),
+            check_scalar("f_pvalue", wald.f_p_value, as_f64(&fx["f_pvalue"]), 1e-7),
         ],
     );
     // Reference vector that statsmodels and inferust both compute.
     let expected_rb: Vec<f64> = r
         .iter()
-        .map(|row| row.iter().zip(result.coefficients.iter()).map(|(rij, b)| rij * b).sum())
+        .map(|row| {
+            row.iter()
+                .zip(result.coefficients.iter())
+                .map(|(rij, b)| rij * b)
+                .sum()
+        })
         .collect();
     assert_parity(
         "wald_rb",
@@ -408,8 +412,18 @@ fn parity_tukey_hsd() {
             &as_f64_vec(&fx["p_values"]),
             5e-3,
         ),
-        check_vec("conf_int_lower", &actual_conf_lower, &expected_conf_lower, 5e-3),
-        check_vec("conf_int_upper", &actual_conf_upper, &expected_conf_upper, 5e-3),
+        check_vec(
+            "conf_int_lower",
+            &actual_conf_lower,
+            &expected_conf_lower,
+            5e-3,
+        ),
+        check_vec(
+            "conf_int_upper",
+            &actual_conf_upper,
+            &expected_conf_upper,
+            5e-3,
+        ),
     ];
     if actual_reject != expected_reject {
         checks.push(Err(format!(

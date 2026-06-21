@@ -146,7 +146,11 @@ fn parity_gamma_glm() {
     check_gamma_link(&log_link, &fx["log"], "log");
 }
 
-fn check_gamma_link(result: &inferust::glm::GammaResult, expected: &serde_json::Value, label: &str) {
+fn check_gamma_link(
+    result: &inferust::glm::GammaResult,
+    expected: &serde_json::Value,
+    label: &str,
+) {
     let intervals = result
         .fitted_mean_intervals(0.05)
         .expect("fitted_mean_intervals failed");
@@ -179,7 +183,12 @@ fn check_gamma_link(result: &inferust::glm::GammaResult, expected: &serde_json::
                 &as_f64_vec(&expected["params"]),
                 1e-5,
             ),
-            check_vec("bse", &result.std_errors, &as_f64_vec(&expected["bse"]), 1e-5),
+            check_vec(
+                "bse",
+                &result.std_errors,
+                &as_f64_vec(&expected["bse"]),
+                1e-5,
+            ),
             check_scalar("llf", result.log_likelihood, as_f64(&expected["llf"]), 1e-5),
             check_scalar(
                 "llnull",
@@ -187,7 +196,12 @@ fn check_gamma_link(result: &inferust::glm::GammaResult, expected: &serde_json::
                 as_f64(&expected["llnull"]),
                 1e-5,
             ),
-            check_scalar("deviance", result.deviance, as_f64(&expected["deviance"]), 1e-4),
+            check_scalar(
+                "deviance",
+                result.deviance,
+                as_f64(&expected["deviance"]),
+                1e-4,
+            ),
             check_scalar(
                 "pearson_chi2",
                 result.pearson_chi_squared,

@@ -1432,7 +1432,9 @@ mod granger_engle_tests {
         let n = 120;
         let mut rng_state: u64 = 0x5eed;
         let mut next = || {
-            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            rng_state = rng_state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             ((rng_state >> 33) as f64 / (1u64 << 31) as f64) - 1.0
         };
         let mut y = vec![0.0; n];
@@ -1442,7 +1444,11 @@ mod granger_engle_tests {
             x[t] = next();
         }
         let res = granger_causality(&y, &x, 2).unwrap();
-        assert!(res.p_value > 0.05, "x should not Granger-cause y; got p={:.4}", res.p_value);
+        assert!(
+            res.p_value > 0.05,
+            "x should not Granger-cause y; got p={:.4}",
+            res.p_value
+        );
     }
 
     #[test]
@@ -1451,7 +1457,9 @@ mod granger_engle_tests {
         let n = 150;
         let mut rng_state: u64 = 0xc0ffee;
         let mut next = || {
-            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            rng_state = rng_state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             ((rng_state >> 33) as f64 / (1u64 << 31) as f64) - 1.0
         };
         let mut x = vec![0.0; n];
@@ -1463,7 +1471,11 @@ mod granger_engle_tests {
             y[t] = 0.6 * x[t - 1] + 0.1 * next();
         }
         let res = granger_causality(&y, &x, 2).unwrap();
-        assert!(res.p_value < 0.05, "x should Granger-cause y; got p={:.4}", res.p_value);
+        assert!(
+            res.p_value < 0.05,
+            "x should Granger-cause y; got p={:.4}",
+            res.p_value
+        );
     }
 
     #[test]
@@ -1474,7 +1486,11 @@ mod granger_engle_tests {
             x[t] = x[t - 1] + ((t as f64).sin() * 0.5);
         }
         // y is a noisy linear combination of x → should be cointegrated.
-        let y: Vec<f64> = x.iter().enumerate().map(|(i, &v)| 1.0 + 2.0 * v + ((i as f64) * 0.3).sin() * 0.1).collect();
+        let y: Vec<f64> = x
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| 1.0 + 2.0 * v + ((i as f64) * 0.3).sin() * 0.1)
+            .collect();
         let res = engle_granger(&y, &x, 1).unwrap();
         assert!(res.adf_statistic.is_finite());
         assert!(res.p_value.is_finite());

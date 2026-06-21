@@ -77,7 +77,11 @@ impl RegularizedResult {
 
     /// Predict on new rows (raw feature rows, without an intercept column).
     pub fn predict(&self, x: &[Vec<f64>]) -> Result<Vec<f64>> {
-        let has_intercept = self.feature_names.first().map(|n| n == "const").unwrap_or(false);
+        let has_intercept = self
+            .feature_names
+            .first()
+            .map(|n| n == "const")
+            .unwrap_or(false);
         let offset = usize::from(has_intercept);
         x.iter()
             .map(|row| {
@@ -87,7 +91,11 @@ impl RegularizedResult {
                         y_len: self.k,
                     });
                 }
-                let mut sum = if has_intercept { self.coefficients[0] } else { 0.0 };
+                let mut sum = if has_intercept {
+                    self.coefficients[0]
+                } else {
+                    0.0
+                };
                 for (j, &v) in row.iter().enumerate() {
                     sum += self.coefficients[offset + j] * v;
                 }
@@ -572,7 +580,11 @@ mod tests {
         assert!(result.converged);
         // A strong enough penalty should shrink at least one slope to exactly 0.
         let any_zero = result.coefficients[1..].iter().any(|&c| c == 0.0);
-        assert!(any_zero, "expected at least one zeroed coefficient, got {:?}", result.coefficients);
+        assert!(
+            any_zero,
+            "expected at least one zeroed coefficient, got {:?}",
+            result.coefficients
+        );
     }
 
     #[test]
@@ -595,7 +607,11 @@ mod tests {
         let (x, y) = fixture();
         let ridge_like = ElasticNet::new(1.0, 0.0).fit(&x, &y).unwrap();
         let ridge = Ridge::new(1.0).fit(&x, &y).unwrap();
-        for (a, b) in ridge_like.coefficients.iter().zip(ridge.coefficients.iter()) {
+        for (a, b) in ridge_like
+            .coefficients
+            .iter()
+            .zip(ridge.coefficients.iter())
+        {
             assert_close(*a, *b, 1e-6);
         }
     }

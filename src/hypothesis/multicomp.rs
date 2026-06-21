@@ -63,7 +63,12 @@ impl MultiTestResult {
             self.method, self.alpha
         );
         println!("{:>6} {:>10} {:>12}", "idx", "reject", "p_corrected");
-        for (i, (&rej, &p)) in self.reject.iter().zip(self.p_values_corrected.iter()).enumerate() {
+        for (i, (&rej, &p)) in self
+            .reject
+            .iter()
+            .zip(self.p_values_corrected.iter())
+            .enumerate()
+        {
             println!("{:>6} {:>10} {:>12.6}", i, rej, p);
         }
     }

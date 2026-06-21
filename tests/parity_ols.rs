@@ -55,7 +55,12 @@ fn run_ols_fixture(name: &str) {
         check_vec("tvalues", &result.t_statistics, &expected_t, 1e-7),
         check_vec("pvalues", &result.p_values, &expected_p, 1e-7),
         check_vec("conf_int_05", &ci_actual, &ci_expected, 1e-7),
-        check_vec("fittedvalues", &result.fitted_values, &expected_fitted, 1e-8),
+        check_vec(
+            "fittedvalues",
+            &result.fitted_values,
+            &expected_fitted,
+            1e-8,
+        ),
         check_vec("resid", &result.residuals, &expected_resid, 1e-8),
         check_scalar("rsquared", result.r_squared, as_f64(&fx["rsquared"]), 1e-10),
         check_scalar(
@@ -89,7 +94,12 @@ fn run_ols_fixture(name: &str) {
     let expected_hat = as_f64_vec(&inf_expected["hat_diag"]);
     let expected_cooks = as_f64_vec(&inf_expected["cooks_d"]);
     let expected_studentized = as_f64_vec(&inf_expected["resid_studentized_internal"]);
-    checks.push(check_vec("hat_diag", &influence.leverage, &expected_hat, 1e-8));
+    checks.push(check_vec(
+        "hat_diag",
+        &influence.leverage,
+        &expected_hat,
+        1e-8,
+    ));
     checks.push(check_vec(
         "cooks_d",
         &influence.cooks_distance,
@@ -217,12 +227,7 @@ fn parity_wls() {
                 &as_f64_vec(&fx["pvalues"]),
                 1e-7,
             ),
-            check_scalar(
-                "rsquared",
-                result.r_squared,
-                as_f64(&fx["rsquared"]),
-                1e-9,
-            ),
+            check_scalar("rsquared", result.r_squared, as_f64(&fx["rsquared"]), 1e-9),
             check_scalar(
                 "rsquared_adj",
                 result.adj_r_squared,

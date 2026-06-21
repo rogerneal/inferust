@@ -166,7 +166,8 @@ pub fn tukey_hsd(
     for i in 0..k {
         for j in (i + 1)..k {
             let mean_diff = means[i] - means[j];
-            let se = (mse_within / 2.0 * (1.0 / groups[i].len() as f64 + 1.0 / groups[j].len() as f64))
+            let se = (mse_within / 2.0
+                * (1.0 / groups[i].len() as f64 + 1.0 / groups[j].len() as f64))
                 .sqrt();
             let q_statistic = if se > 0.0 { mean_diff.abs() / se } else { 0.0 };
             let p_value = studentized_range_p_value(q_statistic, k as f64, df_within)?;
@@ -221,8 +222,7 @@ pub fn studentized_range_cdf(q: f64, k: f64, nu: f64) -> Result<f64> {
     let s_upper = (chi.inverse_cdf(1.0 - 1e-10) / nu).sqrt().max(2.0);
     let s_lower = 1e-8_f64;
 
-    let log_norm_const = (nu / 2.0) * (nu / 2.0).ln()
-        - statrs::function::gamma::ln_gamma(nu / 2.0)
+    let log_norm_const = (nu / 2.0) * (nu / 2.0).ln() - statrs::function::gamma::ln_gamma(nu / 2.0)
         + std::f64::consts::LN_2;
 
     let integrand = |s: f64| -> f64 {
@@ -364,10 +364,26 @@ mod tests {
     fn studentized_range_cdf_matches_known_values() {
         // Reference values from scipy.stats.studentized_range.cdf, which
         // computes the same distribution via a different quadrature scheme.
-        assert_close(studentized_range_cdf(3.0, 3.0, 10.0).unwrap(), 0.8650165848, 1e-6);
-        assert_close(studentized_range_cdf(3.0, 3.0, 30.0).unwrap(), 0.8975534133, 1e-6);
-        assert_close(studentized_range_cdf(4.5, 5.0, 15.0).unwrap(), 0.9580690463, 1e-6);
-        assert_close(studentized_range_cdf(2.0, 10.0, 5.0).unwrap(), 0.1190843581, 1e-6);
+        assert_close(
+            studentized_range_cdf(3.0, 3.0, 10.0).unwrap(),
+            0.8650165848,
+            1e-6,
+        );
+        assert_close(
+            studentized_range_cdf(3.0, 3.0, 30.0).unwrap(),
+            0.8975534133,
+            1e-6,
+        );
+        assert_close(
+            studentized_range_cdf(4.5, 5.0, 15.0).unwrap(),
+            0.9580690463,
+            1e-6,
+        );
+        assert_close(
+            studentized_range_cdf(2.0, 10.0, 5.0).unwrap(),
+            0.1190843581,
+            1e-6,
+        );
     }
 
     #[test]

@@ -2,7 +2,9 @@
 
 mod common;
 
-use common::{as_f64, as_f64_matrix, as_f64_vec, assert_parity, check_scalar, check_vec, load_fixture};
+use common::{
+    as_f64, as_f64_matrix, as_f64_vec, assert_parity, check_scalar, check_vec, load_fixture,
+};
 use inferust::survival::CoxPh;
 
 #[test]
