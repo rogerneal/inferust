@@ -9,7 +9,9 @@
 
 mod common;
 
-use common::{as_f64, as_f64_matrix, as_f64_vec, assert_parity, check_scalar, check_vec, load_fixture, xy};
+use common::{
+    as_f64, as_f64_matrix, as_f64_vec, assert_parity, check_scalar, check_vec, load_fixture, xy,
+};
 use inferust::regression::{Fgls, Gls};
 
 #[test]
@@ -34,7 +36,12 @@ fn parity_gls_ar1() {
     assert_parity(
         "gls_ar1",
         vec![
-            check_vec("params", &result.coefficients, &as_f64_vec(&fx["params"]), 1e-6),
+            check_vec(
+                "params",
+                &result.coefficients,
+                &as_f64_vec(&fx["params"]),
+                1e-6,
+            ),
             // NOTE: bse, t-stats and p-values diverge from statsmodels because
             // inferust's sigma² formula in Gls uses `resid' * Ω⁻¹ * y - β' * X'Ω⁻¹y`
             // instead of the correct `y' * Ω⁻¹ * y - β' * X'Ω⁻¹y`.  The coefficient

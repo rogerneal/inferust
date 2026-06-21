@@ -27,7 +27,12 @@ fn run_quantreg_fixture(name: &str, q: f64) {
     assert_parity(
         name,
         vec![
-            check_vec("params", &result.coefficients, &as_f64_vec(&fx["params"]), 1e-4),
+            check_vec(
+                "params",
+                &result.coefficients,
+                &as_f64_vec(&fx["params"]),
+                1e-4,
+            ),
             check_scalar("pseudor2", result.pseudo_r1, as_f64(&fx["pseudor2"]), 1e-4),
         ],
     );
