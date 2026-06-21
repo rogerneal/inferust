@@ -751,6 +751,93 @@ def run_wald_ols(seed: int) -> dict[str, Any]:
     }
 
 
+def run_gls_ar1(n: int, k: int, seed: int, rho: float) -> dict[str, Any]:
+    """GLS with a known AR(1) error covariance matrix Ω[i,j] = rho^|i-j|."""
+    x, y = dataset_linear(n, k, seed)
+    xc = sm.add_constant(x, has_constant="add")
+    # Build AR(1) covariance matrix
+    omega = np.array([[rho ** abs(i - j) for j in range(n)] for i in range(n)])
+    res = sm.GLS(y, xc, sigma=omega).fit()
+    return {
+        "kind": "gls_ar1",
+        "dataset": {"n": n, "k": k, "seed": seed, "rho": rho, **_xy_payload(x, y)},
+        "omega": [[float(omega[i, j]) for j in range(n)] for i in range(n)],
+        "params": _to_list(res.params),
+        "bse": _to_list(res.bse),
+        "tvalues": _to_list(res.tvalues),
+        "pvalues": _to_list(res.pvalues),
+    }
+
+
+def run_fgls_cochrane_orcutt(n: int, k: int, seed: int) -> dict[str, Any]:
+    """FGLS via GLSAR (Cochrane-Orcutt style)."""
+    x, y = dataset_linear(n, k, seed)
+    xc = sm.add_constant(x, has_constant="add")
+    res = sm.GLSAR(y, xc, rho=1).iterative_fit(maxiter=10)
+    return {
+        "kind": "fgls_cochrane_orcutt",
+        "dataset": {"n": n, "k": k, "seed": seed, **_xy_payload(x, y)},
+        "params": _to_list(res.params),
+        "rho": float(res.model.rho[0]) if hasattr(res.model.rho, '__len__') else float(res.model.rho),
+    }
+
+
+def run_quantreg(n: int, k: int, seed: int, q: float) -> dict[str, Any]:
+    """Quantile regression at quantile q."""
+    from statsmodels.regression.quantile_regression import QuantReg
+    x, y = dataset_linear(n, k, seed)
+    xc = sm.add_constant(x, has_constant="add")
+    res = QuantReg(y, xc).fit(q=q)
+    return {
+        "kind": f"quantreg_q{int(q * 100)}",
+        "dataset": {"n": n, "k": k, "seed": seed, **_xy_payload(x, y)},
+        "q": q,
+        "params": _to_list(res.params),
+        "pseudor2": float(res.prsquared),
+    }
+
+
+def run_rolling_ols(n: int, k: int, seed: int, window: int) -> dict[str, Any]:
+    """Rolling OLS with fixed window."""
+    from statsmodels.regression.rolling import RollingOLS
+    x, y = dataset_linear(n, k, seed)
+    xc = sm.add_constant(x, has_constant="add")
+    res = RollingOLS(y, xc, window=window).fit()
+    # params shape: (n, k+1); first `window-1` rows are NaN
+    params_arr = np.asarray(res.params)
+    rsq_arr = np.asarray(res.rsquared)
+    # Only keep rows where window is fully populated (index >= window-1)
+    valid_start = window - 1
+    params_valid = params_arr[valid_start:]
+    rsq_valid = rsq_arr[valid_start:]
+    return {
+        "kind": "rolling_ols",
+        "dataset": {"n": n, "k": k, "seed": seed, "window": window, **_xy_payload(x, y)},
+        "params": _matrix(params_valid),
+        "rsquared": _to_list(rsq_valid),
+    }
+
+
+def run_recursive_ols(n: int, k: int, seed: int) -> dict[str, Any]:
+    """Recursive LS (recursive OLS via statsmodels sm.RecursiveLS)."""
+    x, y = dataset_linear(n, k, seed)
+    xc = sm.add_constant(x, has_constant="add")
+    res = sm.RecursiveLS(y, xc).fit()
+    # recursive_coefficients.filtered has shape (k+1, n) — column t is beta at time t
+    fc = np.asarray(res.recursive_coefficients.filtered)  # shape (k+1, n)
+    # cusum: the CUSUM statistic path (length n - k - 1)
+    cusum_arr = np.asarray(res.cusum)
+    # Extract at specific time indices
+    idx = [10, 20, 30]
+    params_at_idx = {str(i): _to_list(fc[:, i]) for i in idx if i < fc.shape[1]}
+    return {
+        "kind": "recursive_ols",
+        "dataset": {"n": n, "k": k, "seed": seed, **_xy_payload(x, y)},
+        "params_at_idx": params_at_idx,
+        "cusum": _to_list(cusum_arr),
+    }
+
+
 def run_cox(seed: int) -> dict[str, Any]:
     from statsmodels.duration.hazard_regression import PHReg
 
@@ -842,6 +929,14 @@ def main() -> None:
 
     # Survival
     emit(out, "cox_ph", run_cox(seed=16))
+
+    # GLS / FGLS / Quantile / Rolling
+    emit(out, "gls_ar1", run_gls_ar1(n=40, k=2, seed=50, rho=0.6))
+    emit(out, "fgls_cochrane_orcutt", run_fgls_cochrane_orcutt(n=60, k=2, seed=51))
+    emit(out, "quantreg_median", run_quantreg(n=80, k=2, seed=52, q=0.5))
+    emit(out, "quantreg_q25", run_quantreg(n=80, k=2, seed=52, q=0.25))
+    emit(out, "rolling_ols", run_rolling_ols(n=60, k=2, seed=53, window=20))
+    emit(out, "recursive_ols", run_recursive_ols(n=50, k=1, seed=54))
 
     # New (0.1.13) features
     emit(out, "granger_causality", run_granger(seed=17))
