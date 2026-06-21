@@ -24,6 +24,10 @@ nalgebra = "0.33"
 statrs = "0.17"
 thiserror = "1"
 
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
 [[example]]
 name = "diagnostics"
 path = "examples/diagnostics.rs"
@@ -31,3 +35,35 @@ path = "examples/diagnostics.rs"
 [[example]]
 name = "discrete_models"
 path = "examples/discrete_models.rs"
+
+[[test]]
+name = "parity_ols"
+path = "tests/parity_ols.rs"
+
+[[test]]
+name = "parity_glm"
+path = "tests/parity_glm.rs"
+
+[[test]]
+name = "parity_hypothesis"
+path = "tests/parity_hypothesis.rs"
+
+[[test]]
+name = "parity_correlation"
+path = "tests/parity_correlation.rs"
+
+[[test]]
+name = "parity_descriptive"
+path = "tests/parity_descriptive.rs"
+
+[[test]]
+name = "parity_timeseries"
+path = "tests/parity_timeseries.rs"
+
+[[test]]
+name = "parity_survival"
+path = "tests/parity_survival.rs"
+
+[[test]]
+name = "parity_regularized"
+path = "tests/parity_regularized.rs"

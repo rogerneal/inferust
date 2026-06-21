@@ -4,6 +4,60 @@ All notable changes to `inferust` are documented here. This project follows sema
 
 ## [Unreleased]
 
+### Added
+
+- **Multiple-testing corrections** — `hypothesis::multicomp::adjust(p_values, alpha, method)`
+  with `Bonferroni`, `Holm`, `BenjaminiHochberg`, and `BenjaminiYekutieli`,
+  matching `statsmodels.stats.multitest.multipletests` exactly.
+- **Tukey HSD post-hoc test** — `hypothesis::tukey::tukey_hsd(groups, names, alpha)`
+  for family-wise-error-rate-controlled pairwise comparisons after ANOVA, with
+  the Tukey-Kramer adjustment for unequal group sizes. Matches
+  `statsmodels.stats.multicomp.pairwise_tukeyhsd` on mean differences and
+  standard errors; the q-critical value, p-values, and confidence intervals
+  depend on the studentized range distribution, which inferust computes via
+  quadrature (~1e-9 accurate) rather than statsmodels' interpolated table
+  (~1e-3 accurate) — see `docs/parity.md`.
+- **Ridge, Lasso, and ElasticNet regression** — `regression::{Ridge, Lasso,
+  ElasticNet}` with closed-form ridge and coordinate-descent lasso/elastic
+  net (soft-thresholding), following the scikit-learn/glmnet convention of
+  never penalizing the intercept.
+- **Gamma GLM** — `glm::Gamma` for positive, right-skewed continuous outcomes
+  (costs, durations, claim sizes), with `InversePower` (canonical), `Log`,
+  and `Identity` links, IRLS/Fisher-scoring fitting, and the same covariance,
+  residual, likelihood-ratio, and prediction-interval helpers as
+  `Logistic`/`Poisson`. `glm_family::GlmFamily` gained a `Gamma` variant.
+- **Granger causality F-test** — `time_series::granger_causality(y, x, lag)` for
+  whether lagged values of `x` help predict `y`.
+- **Engle-Granger cointegration test** — `time_series::engle_granger(y, x, lags)`
+  for two-step residual-based cointegration testing with one regressor.
+- **Wilcoxon signed-rank** and **sign test** — `hypothesis::nonparametric::wilcoxon_signed_rank`
+  and `::sign_test` for paired-sample inference; signed-rank handles zero
+  differences and ties.
+- **Anderson-Darling** and **Lilliefors** normality tests — added to
+  `hypothesis::nonparametric` alongside Shapiro-Wilk. Both estimate mean and
+  variance from the sample.
+- **Wald linear-restriction tests** — `hypothesis::wald_linear(beta, cov, R, q, df)`
+  plus convenience `.wald_test(R, q)` methods on `OlsResult`, `LogisticResult`,
+  and `PoissonResult`. Returns both the χ² and finite-sample F forms.
+- `OlsResult.covariance_matrix` is now exposed (was previously available only as
+  `std_errors`).
+- Parity fixtures and Rust integration tests for every feature above.
+
+- **statsmodels parity harness** — `scripts/parity_statsmodels.py` generates
+  reference JSON fixtures from `statsmodels` / `scipy.stats` on deterministic
+  LCG-built datasets; integration tests under `tests/parity_*.rs` load each
+  fixture and compare every output at a per-field tolerance.
+- **Parity audit doc** — `docs/parity.md` defines the parity contract, the
+  tolerance policy, the per-module status matrix, and the prioritized backlog
+  of estimators still needing parity coverage.
+- First-pass parity coverage: OLS (Nonrobust, HC0–HC3), WLS, Logit, Poisson,
+  Cox PH, ACF/PACF/Ljung-Box, ADF, one- and two-sample t-tests, one-way ANOVA,
+  Mann-Whitney U, chi-squared independence, Pearson/Spearman, descriptive
+  summary statistics. ARIMA covered structurally (CSS vs MLE differ by design).
+- Parity coverage for the Tier 1 additions above: `multicomp`, `tukey_hsd`,
+  `ridge_small`/`lasso_small`/`elastic_net_small`, and `gamma_glm` (both
+  links) fixtures and `tests/parity_*.rs` assertions.
+
 ## [0.1.12] - 2026-05-06
 
 ### Added

@@ -14,6 +14,12 @@ pub struct OlsResult {
     pub coefficients: Vec<f64>,
     /// Standard errors of each coefficient.
     pub std_errors: Vec<f64>,
+    /// Full covariance matrix of the coefficient estimates (k × k row-major).
+    ///
+    /// Populated using whatever covariance estimator was selected on the builder
+    /// (Nonrobust, HC0–HC3, HAC, or Cluster). Use this for Wald tests on
+    /// linear restrictions via [`OlsResult::wald_test`].
+    pub covariance_matrix: Vec<Vec<f64>>,
     /// Covariance estimator used for standard errors, test statistics, and intervals.
     pub covariance: OlsCovariance,
     /// t-statistics: `coef / std_err`.
@@ -146,6 +152,39 @@ impl OlsResult {
         println!(" Significance codes:  *** p<0.001  ** p<0.01  * p<0.05  . p<0.1");
         println!("═══════════════════════════════════════════════════════════════════");
         println!();
+    }
+
+    /// Wald test of a linear restriction `R·β = q`.
+    ///
+    /// `r` has `r_rows × k` entries (one row per restriction) and `q` is the
+    /// target vector of length `r_rows`. Returns the chi-square statistic, the
+    /// finite-sample F equivalent, and both p-values.
+    ///
+    /// # Example
+    /// ```
+    /// use inferust::regression::Ols;
+    /// let x = vec![vec![1.0, 2.0], vec![2.0, 4.0], vec![3.0, 1.0],
+    ///              vec![4.0, 3.0], vec![5.0, 5.0]];
+    /// let y = vec![1.0, 2.5, 3.0, 4.0, 5.0];
+    /// let result = Ols::new().fit(&x, &y).unwrap();
+    /// // Test whether the two slopes are jointly zero (skipping the intercept).
+    /// let r = vec![vec![0.0, 1.0, 0.0], vec![0.0, 0.0, 1.0]];
+    /// let q = vec![0.0, 0.0];
+    /// let wald = result.wald_test(&r, &q).unwrap();
+    /// assert_eq!(wald.df_num, 2);
+    /// ```
+    pub fn wald_test(
+        &self,
+        r: &[Vec<f64>],
+        q: &[f64],
+    ) -> Result<crate::hypothesis::WaldTestResult> {
+        crate::hypothesis::wald_linear(
+            &self.coefficients,
+            &self.covariance_matrix,
+            r,
+            q,
+            Some(self.df_resid),
+        )
     }
 
     /// Two-sided confidence intervals for coefficients.
@@ -660,6 +699,9 @@ fn fit_linear_model(spec: FitSpec<'_>) -> Result<OlsResult> {
         df_resid,
     );
     let std_errors: Vec<f64> = (0..ncols).map(|i| cov_beta[(i, i)].sqrt()).collect();
+    let covariance_matrix: Vec<Vec<f64>> = (0..ncols)
+        .map(|i| (0..ncols).map(|j| cov_beta[(i, j)]).collect())
+        .collect();
     let coefficients: Vec<f64> = beta.iter().cloned().collect();
     let t_statistics: Vec<f64> = coefficients
         .iter()
@@ -723,6 +765,7 @@ fn fit_linear_model(spec: FitSpec<'_>) -> Result<OlsResult> {
         model_name: model_name.to_string(),
         coefficients,
         std_errors,
+        covariance_matrix,
         covariance,
         t_statistics,
         p_values,

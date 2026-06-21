@@ -17,16 +17,19 @@
 |--------|-------------|-------------------|
 | `regression::Ols` / `Wls` / `Gls` / `Fgls` / `QuantileRegression` | OLS, weighted least squares, GLS with known covariance, AR(1) feasible GLS, and quantile regression with fast/stable solvers, robust/HAC/cluster SEs, confidence intervals, influence diagnostics, residual diagnostics, Durbin-Watson, Jarque-Bera, condition numbers, t/z stats, p-values, R², adj-R², pseudo R¹, F-stat, AIC, BIC | `statsmodels.OLS().fit()`, `statsmodels.WLS().fit()`, `statsmodels.GLS().fit()`, `statsmodels.GLSAR()`, `statsmodels.QuantReg().fit()` |
 | `regression::RollingOls` / `RecursiveOls` | Rolling-window coefficient paths and recursive OLS with CUSUM stability diagnostics | `statsmodels.regression.rolling.RollingOLS`, `statsmodels.regression.recursive_ls.RecursiveLS` basics |
+| `regression::Ridge` / `Lasso` / `ElasticNet` | L2/L1/mixed-penalty regularized regression (closed-form ridge, coordinate-descent lasso/elastic net), never penalizing the intercept | `statsmodels.OLS().fit_regularized()`, scikit-learn's `Ridge`/`Lasso`/`ElasticNet` |
 | `hypothesis::ttest` | One-sample, two-sample Welch, paired t-tests with 95% CI | `scipy.stats.ttest_*` |
 | `hypothesis::chisq` / `contingency` | Goodness-of-fit, independence, 2x2 odds/risk ratios, McNemar, and CMH | `scipy.stats.chisquare`, `chi2_contingency`, `statsmodels.stats.contingency_tables` |
 | `hypothesis::anova` | One-way ANOVA table (SS, MS, F, p) | `scipy.stats.f_oneway` |
+| `hypothesis::tukey` | Tukey HSD post-hoc pairwise comparisons (Tukey-Kramer adjusted) | `statsmodels.stats.multicomp.pairwise_tukeyhsd` |
+| `hypothesis::multicomp` | Multiple-testing p-value correction (Bonferroni, Holm, Benjamini-Hochberg, Benjamini-Yekutieli) | `statsmodels.stats.multitest.multipletests` |
 | `descriptive::Summary` | mean, std, variance, min/max, quartiles, skewness, excess kurtosis | `pd.Series.describe()` |
 | `data::DataFrame` | named numeric/string columns, `formula!` macro, transforms, missing-row dropping, and formula-based OLS/WLS/quantile/logistic/Poisson fitting with categorical dummy expansion | `statsmodels.formula.api` basics |
-| `glm::Logistic` / `Poisson` | binary logistic and Poisson count regression with MLE estimates, Wald inference, covariance, residual diagnostics, likelihood-ratio tests, prediction intervals, classification metrics, and post-estimation helpers | `statsmodels.Logit().fit()`, `statsmodels.GLM(..., Poisson()).fit()` |
+| `glm::Logistic` / `Poisson` / `Gamma` | binary logistic, Poisson count, and Gamma (positive continuous) regression with MLE/IRLS estimates, Wald inference, covariance, residual diagnostics, likelihood-ratio tests, prediction intervals, classification metrics, and post-estimation helpers | `statsmodels.Logit().fit()`, `statsmodels.GLM(..., Poisson()).fit()`, `statsmodels.GLM(..., Gamma()).fit()` |
 | `gam::GaussianGam` | additive Gaussian regression with spline basis expansion and statsmodels-style OLS summaries on the expanded design | `statsmodels.gam.GLMGam` basics |
 | `gmm::Iv2Sls` | instrumental variables regression via two-stage least squares with t inference and summary output | `statsmodels.sandbox.regression.gmm.IV2SLS`, `statsmodels.gmm` basics |
 | `discrete` | Probit, ordered logit, negative binomial, multinomial logit, and zero-inflated Poisson starters | `statsmodels.discrete` basics |
-| `glm_family` | generic Gaussian/Binomial/Poisson GLM dispatch | `statsmodels.GLM` basics |
+| `glm_family` | generic Gaussian/Binomial/Poisson/Gamma GLM dispatch | `statsmodels.GLM` basics |
 | `multivariate` | one-way MANOVA and PCA starters | `statsmodels.multivariate` basics |
 | `imputation` | mean imputation and MICE-style chained equations | `statsmodels.imputation.mice` basics |
 | `treatment` | propensity scores, IPW ATE/ATT, and balance diagnostics | `statsmodels.treatment` basics |
@@ -285,6 +288,40 @@ let lr_test = result.likelihood_ratio_test().unwrap();
 
 Poisson results include covariance estimates, fitted values, response/Pearson/deviance residuals, log-likelihood, null log-likelihood, pseudo-R², deviance, null deviance, Pearson chi-square, AIC, BIC, likelihood-ratio tests, and response-scale mean intervals. `DataFrame::poisson("count ~ exposure + age")` provides formula-based fitting.
 
+### Gamma regression
+
+```rust
+use inferust::glm::{Gamma, GammaLink};
+
+let result = Gamma::new()                       // canonical InversePower link
+    .with_feature_names(vec!["claim_age".into()])
+    .fit(&x, &positive_costs)
+    .unwrap();
+
+let log_link = Gamma::new()
+    .with_link(GammaLink::Log)
+    .fit(&x, &positive_costs)
+    .unwrap();
+
+let mean_intervals = result.fitted_mean_intervals(0.05).unwrap();
+```
+
+`Gamma` fits positive, right-skewed continuous outcomes (costs, durations, claim sizes) via IRLS, exposing the same covariance, residual, likelihood-ratio, and prediction-interval helpers as `Logistic`/`Poisson`. `GammaLink::InversePower` (default), `Log`, and `Identity` are supported.
+
+### Regularized regression
+
+```rust
+use inferust::regression::{ElasticNet, Lasso, Ridge};
+
+let ridge = Ridge::new(0.5).fit(&x, &y).unwrap();
+let lasso = Lasso::new(0.1).fit(&x, &y).unwrap();
+let elastic_net = ElasticNet::new(0.2, 0.5).fit(&x, &y).unwrap(); // l1_ratio = 0.5
+
+elastic_net.print_summary();
+```
+
+Ridge is solved in closed form; Lasso and ElasticNet use cyclical coordinate descent with soft-thresholding. None of the three penalize the intercept (the scikit-learn/glmnet convention) — see the `regression::regularized` module docs for the exact objective and how to reproduce it in `statsmodels.OLS().fit_regularized()`.
+
 ### Hypothesis tests
 
 ```rust
@@ -307,6 +344,23 @@ chisq::goodness_of_fit(&observed, None).unwrap().print();
 // Chi-squared test of independence
 chisq::independence(&contingency_table).unwrap().print();
 ```
+
+### Tukey HSD and multiple-testing corrections
+
+```rust
+use inferust::hypothesis::{adjust, tukey_hsd, MultiTestMethod};
+
+// Pairwise post-hoc comparisons after a one-way ANOVA.
+let tukey = tukey_hsd(&[&group1, &group2, &group3], None, 0.05).unwrap();
+tukey.print();
+
+// Correct a family of p-values for multiple comparisons.
+let p_values = vec![0.001, 0.02, 0.03, 0.04, 0.5];
+let corrected = adjust(&p_values, 0.05, MultiTestMethod::BenjaminiHochberg).unwrap();
+corrected.print();
+```
+
+`tukey_hsd` controls the family-wise error rate across every pairwise group comparison using the studentized range distribution (Tukey-Kramer adjusted for unequal group sizes). `adjust` supports `Bonferroni`, `Holm`, `BenjaminiHochberg`, and `BenjaminiYekutieli`.
 
 ### Descriptive statistics
 
@@ -462,9 +516,11 @@ match result {
 ## Roadmap
 
 - [x] Logistic regression (GLM with logit link)
-- [ ] Ridge / Lasso regularization
+- [x] Gamma regression (GLM with InversePower/Log/Identity links)
+- [x] Ridge / Lasso / ElasticNet regularization
 - [x] Durbin-Watson and Breusch-Pagan diagnostic tests
-- [ ] Tukey HSD post-hoc test (after ANOVA)
+- [x] Tukey HSD post-hoc test (after ANOVA)
+- [x] Multiple-testing corrections (Bonferroni, Holm, Benjamini-Hochberg/Yekutieli)
 - [x] Time-series: ARIMA / ACF / PACF
 - [x] Weighted OLS
 

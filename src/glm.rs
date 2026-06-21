@@ -122,6 +122,24 @@ impl LogisticResult {
         self.coefficients.iter().map(|coef| coef.exp()).collect()
     }
 
+    /// Wald test of a linear restriction `R·β = q` on the logistic coefficients.
+    ///
+    /// Logistic regression is asymptotic, so the chi-square form is canonical;
+    /// the F-statistic in the result is informational only.
+    pub fn wald_test(
+        &self,
+        r: &[Vec<f64>],
+        q: &[f64],
+    ) -> Result<crate::hypothesis::WaldTestResult> {
+        crate::hypothesis::wald_linear(
+            &self.coefficients,
+            &self.covariance_matrix,
+            r,
+            q,
+            None,
+        )
+    }
+
     /// Average marginal effects for each non-intercept predictor.
     pub fn average_marginal_effects(&self) -> Vec<(String, f64)> {
         let scale = self.average_probability_slope();
@@ -593,6 +611,23 @@ impl PoissonResult {
         self.coefficients.iter().map(|coef| coef.exp()).collect()
     }
 
+    /// Wald test of a linear restriction `R·β = q` on the Poisson coefficients.
+    ///
+    /// Poisson regression is asymptotic; the chi-square form is canonical.
+    pub fn wald_test(
+        &self,
+        r: &[Vec<f64>],
+        q: &[f64],
+    ) -> Result<crate::hypothesis::WaldTestResult> {
+        crate::hypothesis::wald_linear(
+            &self.coefficients,
+            &self.covariance_matrix,
+            r,
+            q,
+            None,
+        )
+    }
+
     /// Linear predictor values for raw X rows, without the intercept column.
     pub fn predict_linear(&self, x: &[Vec<f64>]) -> Vec<f64> {
         x.iter()
@@ -899,6 +934,473 @@ impl Poisson {
     }
 }
 
+/// Link function for [`Gamma`] regression.
+///
+/// `InversePower` (`g(mu) = 1/mu`) is the canonical link for the Gamma
+/// family and is the default here, matching
+/// `statsmodels.genmod.families.Gamma()`'s default link. `Log`
+/// (`g(mu) = ln(mu)`) is the most common choice in applied work (e.g. cost,
+/// claim-size, or duration models) because it keeps the mean strictly
+/// positive for any linear predictor. `Identity` (`g(mu) = mu`) is supported
+/// for completeness but offers no positivity guarantee and can be
+/// numerically fragile far from convergence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GammaLink {
+    Log,
+    Identity,
+    InversePower,
+}
+
+impl GammaLink {
+    fn linkfun(&self, mu: f64) -> f64 {
+        match self {
+            GammaLink::Log => mu.ln(),
+            GammaLink::Identity => mu,
+            GammaLink::InversePower => 1.0 / mu,
+        }
+    }
+
+    fn linkinv(&self, eta: f64) -> f64 {
+        match self {
+            GammaLink::Log => eta.clamp(-700.0, 700.0).exp(),
+            GammaLink::Identity => eta,
+            GammaLink::InversePower => 1.0 / eta,
+        }
+    }
+
+    /// Returns `(mu, dmu/deta)` at the given linear predictor. `mu` is
+    /// floored away from zero/negative values for numerical stability
+    /// during IRLS before convergence; the derivative is recomputed from
+    /// the floored `mu` so the two stay consistent.
+    fn mu_and_derivative(&self, eta: f64) -> (f64, f64) {
+        match self {
+            GammaLink::Log => {
+                let mu = eta.clamp(-700.0, 700.0).exp().max(1e-8);
+                (mu, mu)
+            }
+            GammaLink::Identity => (eta.max(1e-8), 1.0),
+            GammaLink::InversePower => {
+                let mu = (1.0 / eta).max(1e-8);
+                (mu, -mu * mu)
+            }
+        }
+    }
+}
+
+/// Gamma regression result for positive, right-skewed continuous outcomes
+/// (e.g. costs, durations, claim sizes).
+#[derive(Debug, Clone)]
+pub struct GammaResult {
+    pub coefficients: Vec<f64>,
+    pub std_errors: Vec<f64>,
+    pub z_statistics: Vec<f64>,
+    pub p_values: Vec<f64>,
+    pub covariance_matrix: Vec<Vec<f64>>,
+    pub fitted_values: Vec<f64>,
+    pub log_likelihood: f64,
+    pub null_log_likelihood: f64,
+    pub pseudo_r_squared: f64,
+    pub deviance: f64,
+    pub pearson_chi_squared: f64,
+    /// Moment (Pearson chi-squared / df_resid) estimate of the Gamma
+    /// dispersion parameter; matches statsmodels' default `scale`.
+    pub dispersion: f64,
+    pub aic: f64,
+    pub bic: f64,
+    pub n: usize,
+    pub k: usize,
+    pub feature_names: Vec<String>,
+    link: GammaLink,
+    observed: Vec<f64>,
+    design_matrix: Vec<Vec<f64>>,
+    iterations: usize,
+}
+
+impl GammaResult {
+    /// Predict the mean response for raw X rows, without the intercept column.
+    pub fn predict(&self, x: &[Vec<f64>]) -> Vec<f64> {
+        x.iter()
+            .map(|row| {
+                let eta = linear_predict(row, &self.coefficients, &self.feature_names);
+                self.link.linkinv(eta)
+            })
+            .collect()
+    }
+
+    /// Wald confidence intervals for coefficients at the requested alpha level.
+    pub fn confidence_intervals(&self, alpha: f64) -> Result<Vec<(f64, f64)>> {
+        if !(0.0..1.0).contains(&alpha) {
+            return Err(InferustError::InvalidInput(
+                "alpha must be between 0 and 1".into(),
+            ));
+        }
+        let normal = Normal::new(0.0, 1.0)
+            .map_err(|_| InferustError::InvalidInput("invalid normal distribution".into()))?;
+        let z = normal.inverse_cdf(1.0 - alpha / 2.0);
+        Ok(self
+            .coefficients
+            .iter()
+            .zip(self.std_errors.iter())
+            .map(|(coef, se)| (coef - z * se, coef + z * se))
+            .collect())
+    }
+
+    /// Wald test of a linear restriction `R·β = q` on the Gamma coefficients.
+    ///
+    /// Gamma regression is asymptotic; the chi-square form is canonical.
+    pub fn wald_test(
+        &self,
+        r: &[Vec<f64>],
+        q: &[f64],
+    ) -> Result<crate::hypothesis::WaldTestResult> {
+        crate::hypothesis::wald_linear(
+            &self.coefficients,
+            &self.covariance_matrix,
+            r,
+            q,
+            None,
+        )
+    }
+
+    /// Linear predictor values for raw X rows, without the intercept column.
+    pub fn predict_linear(&self, x: &[Vec<f64>]) -> Vec<f64> {
+        x.iter()
+            .map(|row| linear_predict(row, &self.coefficients, &self.feature_names))
+            .collect()
+    }
+
+    /// Response, Pearson, and deviance residuals for the training data.
+    pub fn residuals(&self) -> GlmResiduals {
+        let response = self
+            .observed
+            .iter()
+            .zip(self.fitted_values.iter())
+            .map(|(yi, mui)| yi - mui)
+            .collect::<Vec<_>>();
+        let pearson = self
+            .observed
+            .iter()
+            .zip(self.fitted_values.iter())
+            .map(|(yi, mui)| (yi - mui) / mui.max(1e-12))
+            .collect::<Vec<_>>();
+        let deviance = self
+            .observed
+            .iter()
+            .zip(self.fitted_values.iter())
+            .map(|(yi, mui)| gamma_deviance_residual(*yi, *mui))
+            .collect::<Vec<_>>();
+
+        GlmResiduals {
+            response,
+            pearson,
+            deviance,
+        }
+    }
+
+    /// Null model deviance against a saturated Gamma model.
+    pub fn null_deviance(&self) -> f64 {
+        let mean = self.observed.iter().sum::<f64>() / self.n as f64;
+        gamma_deviance(&self.observed, &vec![mean; self.n])
+    }
+
+    /// Likelihood-ratio test against the intercept-only model.
+    pub fn likelihood_ratio_test(&self) -> Result<LikelihoodRatioTest> {
+        likelihood_ratio_test(self.log_likelihood, self.null_log_likelihood, self.k)
+    }
+
+    /// Fitted mean confidence intervals for the training rows.
+    pub fn fitted_mean_intervals(&self, alpha: f64) -> Result<Vec<PredictionInterval>> {
+        gamma_prediction_intervals(
+            &self.design_matrix,
+            &self.coefficients,
+            &self.covariance_matrix,
+            alpha,
+            self.link,
+        )
+    }
+
+    /// Mean confidence intervals for raw X rows, without the intercept column.
+    pub fn predict_mean_intervals(
+        &self,
+        x: &[Vec<f64>],
+        alpha: f64,
+    ) -> Result<Vec<PredictionInterval>> {
+        let design = build_prediction_design(x, &self.feature_names);
+        gamma_prediction_intervals(
+            &design,
+            &self.coefficients,
+            &self.covariance_matrix,
+            alpha,
+            self.link,
+        )
+    }
+
+    /// Number of IRLS iterations used to fit the model.
+    pub fn iterations(&self) -> usize {
+        self.iterations
+    }
+
+    /// Link function used to fit the model.
+    pub fn link(&self) -> GammaLink {
+        self.link
+    }
+}
+
+/// Gamma regression builder for positive, right-skewed continuous outcomes.
+pub struct Gamma {
+    feature_names: Vec<String>,
+    add_intercept: bool,
+    max_iter: usize,
+    tolerance: f64,
+    link: GammaLink,
+}
+
+impl Default for Gamma {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Gamma {
+    /// Create a new Gamma regression builder. An intercept term is added by
+    /// default, and the link defaults to [`GammaLink::InversePower`] (the
+    /// canonical link, matching `statsmodels.genmod.families.Gamma()`'s
+    /// default). Use [`Gamma::with_link`] to switch to `Log` (the most
+    /// common choice in practice) or `Identity`.
+    pub fn new() -> Self {
+        Self {
+            feature_names: Vec::new(),
+            add_intercept: true,
+            max_iter: 100,
+            tolerance: 1e-8,
+            link: GammaLink::InversePower,
+        }
+    }
+
+    /// Set human-readable names for predictor columns.
+    pub fn with_feature_names(mut self, names: Vec<String>) -> Self {
+        self.feature_names = names;
+        self
+    }
+
+    /// Fit without an intercept.
+    pub fn no_intercept(mut self) -> Self {
+        self.add_intercept = false;
+        self
+    }
+
+    /// Set maximum IRLS iterations.
+    pub fn max_iter(mut self, max_iter: usize) -> Self {
+        self.max_iter = max_iter;
+        self
+    }
+
+    /// Set convergence tolerance on the largest coefficient update.
+    pub fn tolerance(mut self, tolerance: f64) -> Self {
+        self.tolerance = tolerance;
+        self
+    }
+
+    /// Set the link function. Defaults to [`GammaLink::InversePower`].
+    pub fn with_link(mut self, link: GammaLink) -> Self {
+        self.link = link;
+        self
+    }
+
+    /// Fit a Gamma regression model using IRLS (Fisher scoring), matching
+    /// `statsmodels.GLM(y, X, family=sm.families.Gamma(link=...)).fit()`.
+    pub fn fit(&self, x: &[Vec<f64>], y: &[f64]) -> Result<GammaResult> {
+        let n = y.len();
+        if n < 2 {
+            return Err(InferustError::InsufficientData { needed: 2, got: n });
+        }
+        if x.len() != n {
+            return Err(InferustError::DimensionMismatch {
+                x_rows: x.len(),
+                y_len: n,
+            });
+        }
+        if let Some(value) = y.iter().find(|value| **value <= 0.0 || !value.is_finite()) {
+            return Err(InferustError::InvalidInput(format!(
+                "gamma regression requires finite, strictly positive y values, got {value}"
+            )));
+        }
+
+        let p = x[0].len();
+        let ncols = if self.add_intercept { p + 1 } else { p };
+        if n <= ncols {
+            return Err(InferustError::InsufficientData {
+                needed: ncols + 1,
+                got: n,
+            });
+        }
+
+        let mut design = Vec::with_capacity(n * ncols);
+        for row in x {
+            if row.len() != p {
+                return Err(InferustError::InvalidInput(
+                    "all rows in X must have the same length".into(),
+                ));
+            }
+            if self.add_intercept {
+                design.push(1.0);
+            }
+            design.extend_from_slice(row);
+        }
+
+        let x_mat = DMatrix::from_row_slice(n, ncols, &design);
+        let y_mean = y.iter().sum::<f64>() / n as f64;
+
+        let mut eta: Vec<f64> = y
+            .iter()
+            .map(|&yi| self.link.linkfun(((yi + y_mean) / 2.0).max(1e-8)))
+            .collect();
+        let mut beta = DVector::zeros(ncols);
+        let mut converged = false;
+        let mut iterations = 0;
+
+        for iter in 0..self.max_iter {
+            iterations = iter + 1;
+            let mut w = vec![0.0; n];
+            let mut z = vec![0.0; n];
+            for i in 0..n {
+                let (mu_i, dmu_deta_i) = self.link.mu_and_derivative(eta[i]);
+                let safe_slope = if dmu_deta_i.abs() < 1e-12 {
+                    dmu_deta_i.signum() * 1e-12
+                } else {
+                    dmu_deta_i
+                };
+                w[i] = (safe_slope * safe_slope) / (mu_i * mu_i);
+                z[i] = eta[i] + (y[i] - mu_i) / safe_slope;
+            }
+
+            let w_diag = DMatrix::from_diagonal(&DVector::from_vec(w));
+            let xtw = x_mat.transpose() * &w_diag;
+            let xtwx = &xtw * &x_mat;
+            let xtwz = &xtw * DVector::from_vec(z);
+            let new_beta = xtwx
+                .clone()
+                .lu()
+                .solve(&xtwz)
+                .ok_or(InferustError::SingularMatrix)?;
+            let max_delta = (&new_beta - &beta)
+                .iter()
+                .map(|v| v.abs())
+                .fold(0.0_f64, f64::max);
+            beta = new_beta;
+            let eta_vec = &x_mat * &beta;
+            eta = eta_vec.iter().cloned().collect();
+            if max_delta < self.tolerance {
+                converged = true;
+                break;
+            }
+        }
+
+        if !converged {
+            return Err(InferustError::InvalidInput(format!(
+                "gamma regression failed to converge in {} iterations",
+                self.max_iter
+            )));
+        }
+
+        let fitted_values: Vec<f64> = eta
+            .iter()
+            .map(|&e| self.link.linkinv(e).max(1e-12))
+            .collect();
+
+        let mut w_final = vec![0.0; n];
+        for i in 0..n {
+            let (mu_i, dmu_deta_i) = self.link.mu_and_derivative(eta[i]);
+            let safe_slope = if dmu_deta_i.abs() < 1e-12 {
+                dmu_deta_i.signum() * 1e-12
+            } else {
+                dmu_deta_i
+            };
+            w_final[i] = (safe_slope * safe_slope) / (mu_i * mu_i);
+        }
+        let w_diag = DMatrix::from_diagonal(&DVector::from_vec(w_final));
+        let xtwx = x_mat.transpose() * &w_diag * &x_mat;
+
+        let pearson_chi_squared: f64 = y
+            .iter()
+            .zip(fitted_values.iter())
+            .map(|(yi, mui)| (yi - mui).powi(2) / (mui * mui).max(1e-24))
+            .sum();
+        let df_resid = (n - ncols) as f64;
+        let dispersion = pearson_chi_squared / df_resid;
+
+        let cov_unscaled = xtwx.try_inverse().ok_or(InferustError::SingularMatrix)?;
+        let covariance_matrix: Vec<Vec<f64>> = (0..ncols)
+            .map(|i| {
+                (0..ncols)
+                    .map(|j| cov_unscaled[(i, j)] * dispersion)
+                    .collect()
+            })
+            .collect();
+        let design_matrix: Vec<Vec<f64>> = (0..n)
+            .map(|i| (0..ncols).map(|j| x_mat[(i, j)]).collect())
+            .collect();
+        let coefficients: Vec<f64> = beta.iter().cloned().collect();
+        let std_errors: Vec<f64> = (0..ncols).map(|i| covariance_matrix[i][i].sqrt()).collect();
+        let z_statistics: Vec<f64> = coefficients
+            .iter()
+            .zip(std_errors.iter())
+            .map(|(coef, se)| coef / se)
+            .collect();
+        let normal = Normal::new(0.0, 1.0)
+            .map_err(|_| InferustError::InvalidInput("invalid normal distribution".into()))?;
+        let p_values = z_statistics
+            .iter()
+            .map(|z| 2.0 * (1.0 - normal.cdf(z.abs())))
+            .collect::<Vec<_>>();
+
+        let log_likelihood = gamma_log_likelihood(y, &fitted_values, dispersion);
+        let null_fitted = vec![y_mean; n];
+        let null_log_likelihood = gamma_log_likelihood(y, &null_fitted, dispersion);
+        let pseudo_r_squared = 1.0 - log_likelihood / null_log_likelihood;
+        let deviance = gamma_deviance(y, &fitted_values);
+        let n_params = ncols as f64;
+        let aic = -2.0 * log_likelihood + 2.0 * n_params;
+        let bic = -2.0 * log_likelihood + n_params * (n as f64).ln();
+
+        let mut feature_names = Vec::with_capacity(ncols);
+        if self.add_intercept {
+            feature_names.push("const".to_string());
+        }
+        if self.feature_names.is_empty() {
+            for i in 0..(ncols - usize::from(self.add_intercept)) {
+                feature_names.push(format!("x{}", i + 1));
+            }
+        } else {
+            feature_names.extend(self.feature_names.iter().cloned());
+        }
+
+        Ok(GammaResult {
+            coefficients,
+            std_errors,
+            z_statistics,
+            p_values,
+            covariance_matrix,
+            fitted_values,
+            log_likelihood,
+            null_log_likelihood,
+            pseudo_r_squared,
+            deviance,
+            pearson_chi_squared,
+            dispersion,
+            aic,
+            bic,
+            n,
+            k: ncols - usize::from(self.add_intercept),
+            feature_names,
+            link: self.link,
+            observed: y.to_vec(),
+            design_matrix,
+            iterations,
+        })
+    }
+}
+
 /// Likelihood-ratio test for nested likelihood models.
 pub fn likelihood_ratio_test(
     full_log_likelihood: f64,
@@ -970,6 +1472,46 @@ fn prediction_intervals(
                 mean: eta.exp(),
                 lower: (eta - critical * se_eta).exp(),
                 upper: (eta + critical * se_eta).exp(),
+            }
+        })
+        .collect())
+}
+
+/// Like [`prediction_intervals`], but applies a [`GammaLink`]-aware inverse
+/// transform instead of a hardcoded `.exp()`. The two raw Wald bounds on the
+/// linear-predictor scale are min/max-ordered after the inverse-link
+/// transform, since `InversePower` is a decreasing link and would otherwise
+/// report a "lower" bound above the "upper" bound.
+fn gamma_prediction_intervals(
+    design: &[Vec<f64>],
+    coefficients: &[f64],
+    covariance_matrix: &[Vec<f64>],
+    alpha: f64,
+    link: GammaLink,
+) -> Result<Vec<PredictionInterval>> {
+    if !(0.0..1.0).contains(&alpha) {
+        return Err(InferustError::InvalidInput(
+            "alpha must be between 0 and 1".into(),
+        ));
+    }
+    let normal = Normal::new(0.0, 1.0)
+        .map_err(|_| InferustError::InvalidInput("invalid normal distribution".into()))?;
+    let critical = normal.inverse_cdf(1.0 - alpha / 2.0);
+    Ok(design
+        .iter()
+        .map(|row| {
+            let eta = row
+                .iter()
+                .zip(coefficients.iter())
+                .map(|(xij, coef)| xij * coef)
+                .sum::<f64>();
+            let se_eta = quadratic_form(row, covariance_matrix).max(0.0).sqrt();
+            let raw_low = link.linkinv(eta - critical * se_eta);
+            let raw_high = link.linkinv(eta + critical * se_eta);
+            PredictionInterval {
+                mean: link.linkinv(eta),
+                lower: raw_low.min(raw_high),
+                upper: raw_low.max(raw_high),
             }
         })
         .collect())
@@ -1075,6 +1617,37 @@ fn poisson_deviance(y: &[f64], fitted: &[f64]) -> f64 {
         .sum::<f64>()
 }
 
+fn gamma_deviance_residual(y: f64, mu: f64) -> f64 {
+    let m = mu.max(1e-12);
+    let contribution = 2.0 * ((y - m) / m - (y / m).ln());
+    (y - m).signum() * contribution.max(0.0).sqrt()
+}
+
+fn gamma_log_likelihood(y: &[f64], fitted: &[f64], dispersion: f64) -> f64 {
+    let scale = dispersion.max(1e-12);
+    let shape = 1.0 / scale;
+    y.iter()
+        .zip(fitted.iter())
+        .map(|(yi, mui)| {
+            let mu = mui.max(1e-12);
+            let theta = scale * mu;
+            (shape - 1.0) * yi.ln() - yi / theta - shape * theta.ln()
+                - statrs::function::gamma::ln_gamma(shape)
+        })
+        .sum()
+}
+
+fn gamma_deviance(y: &[f64], fitted: &[f64]) -> f64 {
+    2.0 * y
+        .iter()
+        .zip(fitted.iter())
+        .map(|(yi, mui)| {
+            let mu = mui.max(1e-12);
+            (yi - mu) / mu - (yi / mu).ln()
+        })
+        .sum::<f64>()
+}
+
 fn quadratic_form(vector: &[f64], matrix: &[Vec<f64>]) -> f64 {
     vector
         .iter()
@@ -1101,7 +1674,7 @@ fn binary_log_likelihood(y: &[f64], probabilities: &[f64]) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::Logistic;
+    use super::{Gamma, GammaLink, Logistic};
 
     fn assert_close(actual: f64, expected: f64, tolerance: f64) {
         assert!(
@@ -1467,5 +2040,321 @@ mod tests {
         assert_close(result.pearson_chi_squared, 0.8579684437989112, 1e-8);
         assert_close(result.aic, 47.32193289694351, 1e-8);
         assert_close(result.bic, 48.77665284630751, 1e-8);
+    }
+
+    fn gamma_fixture() -> (Vec<Vec<f64>>, Vec<f64>) {
+        (
+            vec![
+                vec![1.0, 0.5],
+                vec![1.5, 0.8],
+                vec![2.0, 1.2],
+                vec![2.5, 0.6],
+                vec![3.0, 1.5],
+                vec![3.5, 2.0],
+                vec![4.0, 1.1],
+                vec![4.5, 2.4],
+                vec![5.0, 1.8],
+                vec![5.5, 2.7],
+                vec![6.0, 2.1],
+                vec![6.5, 3.0],
+                vec![7.0, 2.5],
+                vec![7.5, 3.3],
+                vec![8.0, 2.9],
+            ],
+            vec![
+                2.1, 3.4, 3.9, 4.5, 6.0, 8.1, 6.5, 10.2, 8.8, 12.5, 10.1, 14.8, 12.0, 16.5, 14.1,
+            ],
+        )
+    }
+
+    #[test]
+    fn gamma_inverse_power_link_matches_statsmodels_reference_values() {
+        let (x, y) = gamma_fixture();
+        // Default link is InversePower (canonical), matching
+        // `statsmodels.genmod.families.Gamma()`'s default.
+        let result = Gamma::new().fit(&x, &y).unwrap();
+        assert_eq!(result.link(), GammaLink::InversePower);
+
+        let expected_coefficients = [
+            0.27071028532791985,
+            -0.009524975806982212,
+            -0.04584071004624713,
+        ];
+        let expected_std_errors = [
+            0.02457540732893319,
+            0.007274298836052154,
+            0.018165634336352685,
+        ];
+        let expected_z = [
+            11.015495356986674,
+            -1.3094012250054228,
+            -2.5234852357735544,
+        ];
+        let expected_p = [
+            3.2176180916993663e-28,
+            0.19039847674504373,
+            0.011619793983778806,
+        ];
+        let expected_covariance = [
+            [
+                0.0006039506453829831,
+                -2.8015988801935685e-05,
+                -0.00014569634712167863,
+            ],
+            [
+                -2.8015988801935685e-05,
+                5.2915423556189725e-05,
+                -0.00011559287061448562,
+            ],
+            [
+                -0.00014569634712167863,
+                -0.00011559287061448562,
+                0.0003299902708420756,
+            ],
+        ];
+        let expected_ci = [
+            (0.2225433720578091, 0.3188771985980306),
+            (-0.023782339538426067, 0.0047323879244616455),
+            (-0.08144469910182256, -0.010236720990671702),
+        ];
+        let expected_linear = [
+            0.2382649544978141,
+            0.21975025358044886,
+            0.19665148165845886,
+            0.21939341978271604,
+            0.17337429283760253,
+            0.14569144991098787,
+            0.18218560104911918,
+            0.11783019008550678,
+            0.14057212820976395,
+            0.09455300126465044,
+            0.1172949393889076,
+            0.07127581244379408,
+            0.08943367956342656,
+            0.04799862362293773,
+            0.061572419737945486,
+        ];
+        let expected_fitted = [
+            4.197008335143867,
+            4.550620459848106,
+            5.085138395940408,
+            4.558021844913968,
+            5.767867794198804,
+            6.863820770614633,
+            5.488907983075947,
+            8.486789330258416,
+            7.1137857321743345,
+            10.57607888300696,
+            8.525517001925902,
+            14.030004930334107,
+            11.181469943778819,
+            20.833930736341298,
+            16.24103785844437,
+        ];
+        let expected_response_residuals = [
+            -2.0970083351438666,
+            -1.1506204598481058,
+            -1.1851383959404083,
+            -0.058021844913968224,
+            0.23213220580119565,
+            1.2361792293853666,
+            1.011092016924053,
+            1.7132106697415832,
+            1.6862142678256662,
+            1.9239211169930392,
+            1.5744829980740978,
+            0.7699950696658941,
+            0.8185300562211815,
+            -4.333930736341298,
+            -2.141037858444369,
+        ];
+        let expected_pearson_residuals = [
+            -0.4996435955545903,
+            -0.2528491378264739,
+            -0.23305922153201053,
+            -0.012729610977777877,
+            0.04024575702561511,
+            0.18010074427900172,
+            0.18420640681927478,
+            0.20186793887216914,
+            0.23703472824592278,
+            0.18191251580813053,
+            0.18467888782796685,
+            0.054882024168152424,
+            0.07320415476111866,
+            -0.20802271022152735,
+            -0.1318288816949686,
+        ];
+        let expected_deviance_residuals = [
+            -0.6209525425378858,
+            -0.2779892768407318,
+            -0.2541120657111918,
+            -0.012784029983197194,
+            0.039718181116480705,
+            0.1702993419726945,
+            0.1739744548336747,
+            0.189689096270078,
+            0.22053371922391035,
+            0.17192215251140958,
+            0.17439685030802043,
+            0.053908977472835455,
+            0.07149047241292979,
+            -0.2244987834240372,
+            -0.13811271593969068,
+        ];
+        let expected_mean_intervals = [
+            (4.197008335143867, 3.5902799663252694, 5.050502547621352),
+            (4.550620459848106, 3.908235338413849, 5.4457168918590915),
+            (5.085138395940408, 4.364762802763695, 6.090303154154011),
+            (4.558021844913968, 3.873153341369027, 5.537120563766771),
+            (5.767867794198804, 5.013518311231344, 6.789425817328888),
+            (6.863820770614633, 5.827029935479827, 8.349413936197664),
+            (5.488907983075947, 4.641495860726754, 6.714860672593247),
+            (8.486789330258416, 7.142886961412085, 10.453584741209449),
+            (7.1137857321743345, 6.20383695145881, 8.336550634734538),
+            (10.57607888300696, 8.902676916644284, 13.024184857803403),
+            (8.525517001925902, 7.288807911537129, 10.267653851988971),
+            (14.030004930334107, 11.515898182957502, 17.948439423457174),
+            (11.181469943778819, 9.232460417669897, 14.173566926484623),
+            (20.833930736341298, 15.51871537879328, 31.686758528502992),
+            (16.24103785844437, 12.19058053569271, 24.32244264826881),
+        ];
+
+        for (actual, expected) in result.coefficients.iter().zip(expected_coefficients) {
+            assert_close(*actual, expected, 1e-6);
+        }
+        for (actual, expected) in result.std_errors.iter().zip(expected_std_errors) {
+            assert_close(*actual, expected, 1e-6);
+        }
+        for (actual, expected) in result.z_statistics.iter().zip(expected_z) {
+            assert_close(*actual, expected, 1e-5);
+        }
+        for (actual, expected) in result.p_values.iter().zip(expected_p) {
+            assert_close(*actual, expected, 1e-5);
+        }
+        for (actual_row, expected_row) in result.covariance_matrix.iter().zip(expected_covariance)
+        {
+            for (actual, expected) in actual_row.iter().zip(expected_row) {
+                assert_close(*actual, expected, 1e-6);
+            }
+        }
+        let intervals = result.confidence_intervals(0.05).unwrap();
+        for ((actual_low, actual_high), (expected_low, expected_high)) in
+            intervals.iter().zip(expected_ci)
+        {
+            assert_close(*actual_low, expected_low, 1e-6);
+            assert_close(*actual_high, expected_high, 1e-6);
+        }
+        for (actual, expected) in result.predict_linear(&x).iter().zip(expected_linear) {
+            assert_close(*actual, expected, 1e-6);
+        }
+        for (actual, expected) in result.predict(&x).iter().zip(expected_fitted) {
+            assert_close(*actual, expected, 1e-6);
+        }
+        for (actual, expected) in result.fitted_values.iter().zip(expected_fitted) {
+            assert_close(*actual, expected, 1e-6);
+        }
+        let residuals = result.residuals();
+        for (actual, expected) in residuals.response.iter().zip(expected_response_residuals) {
+            assert_close(*actual, expected, 1e-6);
+        }
+        for (actual, expected) in residuals.pearson.iter().zip(expected_pearson_residuals) {
+            assert_close(*actual, expected, 1e-6);
+        }
+        for (actual, expected) in residuals.deviance.iter().zip(expected_deviance_residuals) {
+            assert_close(*actual, expected, 1e-6);
+        }
+        let mean_intervals = result.fitted_mean_intervals(0.05).unwrap();
+        for (actual, expected) in mean_intervals.iter().zip(expected_mean_intervals) {
+            assert_close(actual.mean, expected.0, 1e-5);
+            assert_close(actual.lower, expected.1, 1e-5);
+            assert_close(actual.upper, expected.2, 1e-5);
+        }
+
+        assert_close(result.log_likelihood, -30.02219819989074, 1e-5);
+        assert_close(result.null_log_likelihood, -62.92429434743555, 1e-5);
+        assert_close(result.pseudo_r_squared, 0.5228838318929152, 1e-5);
+        assert_close(result.deviance, 0.8105234362486319, 1e-6);
+        assert_close(result.null_deviance(), 4.480208396442844, 1e-6);
+        assert_close(result.pearson_chi_squared, 0.6692008212008194, 1e-6);
+        assert_close(result.dispersion, 0.05576673510006824, 1e-6);
+        assert_close(result.aic, 66.04439639978148, 1e-5);
+        assert_close(result.bic, 68.16854700308811, 1e-5);
+        let lr = result.likelihood_ratio_test().unwrap();
+        assert_close(lr.statistic, 65.80419229508962, 1e-4);
+        assert_close(lr.p_value, 5.10702591327572e-15, 1e-12);
+    }
+
+    #[test]
+    fn gamma_log_link_matches_statsmodels_reference_values() {
+        let (x, y) = gamma_fixture();
+        let result = Gamma::new().with_link(GammaLink::Log).fit(&x, &y).unwrap();
+        assert_eq!(result.link(), GammaLink::Log);
+
+        let expected_coefficients = [0.8279544833007723, 0.12756958824671266, 0.3406066677268939];
+        let expected_std_errors = [0.09433281030458336, 0.04352065619887482, 0.10677437685161423];
+        let expected_fitted = [
+            3.0827664916543105,
+            3.6393103516014667,
+            4.445185769769005,
+            3.8622211851875705,
+            5.593321236422364,
+            7.068592486930868,
+            5.545019684701075,
+            9.20248570562508,
+            7.9956242752252695,
+            11.5793717948082,
+            10.060793265653698,
+            14.570177607604567,
+            13.097983281057228,
+            18.333470872083517,
+            17.052051612722178,
+        ];
+
+        for (actual, expected) in result.coefficients.iter().zip(expected_coefficients) {
+            assert_close(*actual, expected, 1e-6);
+        }
+        for (actual, expected) in result.std_errors.iter().zip(expected_std_errors) {
+            assert_close(*actual, expected, 1e-6);
+        }
+        for (actual, expected) in result.fitted_values.iter().zip(expected_fitted) {
+            assert_close(*actual, expected, 1e-6);
+        }
+        assert_close(result.log_likelihood, -22.72952575327173, 1e-5);
+        assert_close(result.null_log_likelihood, -112.19784334734219, 1e-4);
+        assert_close(result.pseudo_r_squared, 0.797415662590718, 1e-5);
+        assert_close(result.deviance, 0.30565773351695225, 1e-6);
+        assert_close(result.null_deviance(), 4.480208396442844, 1e-6);
+        assert_close(result.pearson_chi_squared, 0.2799572480081527, 1e-6);
+        assert_close(result.dispersion, 0.023329770667346067, 1e-6);
+        assert_close(result.aic, 51.45905150654346, 1e-5);
+        assert_close(result.bic, 53.58320210985009, 1e-5);
+    }
+
+    #[test]
+    fn gamma_identity_link_converges_on_well_behaved_data() {
+        let (x, y) = gamma_fixture();
+        let result = Gamma::new()
+            .with_link(GammaLink::Identity)
+            .fit(&x, &y)
+            .unwrap();
+        assert_eq!(result.link(), GammaLink::Identity);
+        // All fitted means should stay strictly positive, since the
+        // underlying data is comfortably away from zero.
+        assert!(result.fitted_values.iter().all(|&mu| mu > 0.0));
+        assert!(result.dispersion > 0.0);
+    }
+
+    #[test]
+    fn gamma_rejects_non_positive_y() {
+        let (x, mut y) = gamma_fixture();
+        y[0] = 0.0;
+        assert!(Gamma::new().fit(&x, &y).is_err());
+    }
+
+    #[test]
+    fn gamma_rejects_dimension_mismatch() {
+        let (x, y) = gamma_fixture();
+        assert!(Gamma::new().fit(&x[..x.len() - 1], &y).is_err());
     }
 }

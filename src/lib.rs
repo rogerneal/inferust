@@ -6,18 +6,18 @@
 //!
 //! | Module | Contents |
 //! |--------|---------|
-//! | [`regression`] | OLS/WLS/GLS/FGLS, quantile regression, plus rolling and recursive OLS with fast/stable/HAC solvers, HC0-HC3 and Newey-West SEs, confidence intervals, influence diagnostics, full summary |
-//! | [`glm`] | Binary logistic and Poisson regression with Wald inference, LRT, residual diagnostics, prediction intervals, classification metrics |
+//! | [`regression`] | OLS/WLS/GLS/FGLS, quantile regression, plus rolling and recursive OLS with fast/stable/HAC solvers, HC0-HC3 and Newey-West SEs, confidence intervals, influence diagnostics, full summary, and Ridge/Lasso/ElasticNet regularization |
+//! | [`glm`] | Binary logistic, Poisson, and Gamma regression with Wald inference, LRT, residual diagnostics, prediction intervals, classification metrics |
 //! | [`gam`] | Gaussian additive models with spline basis expansion |
 //! | [`gmm`] | Instrumental variables / 2SLS econometrics starter |
 //! | [`survival`] | Kaplan-Meier estimator, log-rank test, Cox proportional hazards regression |
 //! | [`statespace`] | Scalar Kalman filter and local-level state-space model |
-//! | [`time_series`] | ARIMA/SARIMA/SARIMAX via CSS, VAR/VECM/VARMAX, AR, ACF/PACF, Ljung-Box, ADF unit root, KPSS stationarity |
-//! | [`hypothesis`] | t-tests, chi-squared, ANOVA, Mann-Whitney U, Kruskal-Wallis, KS tests, Shapiro-Wilk |
+//! | [`time_series`] | ARIMA/SARIMA/SARIMAX via CSS, VAR/VECM/VARMAX, AR, ACF/PACF, Ljung-Box, ADF unit root, KPSS stationarity, Granger causality, Engle-Granger cointegration |
+//! | [`hypothesis`] | t-tests, chi-squared, ANOVA, Tukey HSD post-hoc, multiple-testing corrections (Bonferroni/Holm/BH/BY), Mann-Whitney U, Kruskal-Wallis, Wilcoxon signed-rank, sign test, KS tests, Shapiro-Wilk, Anderson-Darling, Lilliefors, Wald linear-restriction tests |
 //! | [`contingency`] | 2x2 tables, odds/risk ratios, McNemar, CMH |
 //! | [`diagnostics`] | VIF, Breusch-Pagan, White, and RESET diagnostics |
 //! | [`discrete`] | Probit, ordered logit, negative binomial, multinomial logit, and zero-inflated Poisson |
-//! | [`glm_family`] | Generic Gaussian/Binomial/Poisson GLM front-end |
+//! | [`glm_family`] | Generic Gaussian/Binomial/Poisson/Gamma GLM front-end |
 //! | [`multivariate`] | MANOVA and PCA starters |
 //! | [`imputation`] | Mean imputation and MICE-style chained equations |
 //! | [`treatment`] | Propensity scores, IPW treatment effects, and balance diagnostics |
