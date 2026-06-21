@@ -1219,7 +1219,7 @@ pub fn granger_causality(y: &[f64], x: &[f64], lag: usize) -> Result<GrangerCaus
     let n_total = y.len();
     // We use observations from index `lag` onward as the response; predictors
     // are the previous `lag` values of y (and, for the unrestricted model, x).
-    let n = n_total.checked_sub(lag).unwrap_or(0);
+    let n = n_total.saturating_sub(lag);
     let needed = 2 * lag + 2; // intercept + 2*lag predictors + at least one residual df
     if n < needed {
         return Err(InferustError::InsufficientData {
@@ -1407,13 +1407,7 @@ fn engle_granger_p_value(t: f64) -> f64 {
     // Coefficients from MacKinnon (1996), Table 2, N -> infinity, k = 1, with
     // constant. p = Phi(beta0 + beta1*t + beta2*t² + beta3*t³).
     // We fit a robust cubic in t to mimic the statsmodels approximation.
-    let z = if t < -10.0 {
-        -10.0
-    } else if t > 0.0 {
-        0.0
-    } else {
-        t
-    };
+    let z = t.clamp(-10.0, 0.0);
     let approx = 2.5 + 1.85 * z + 0.18 * z * z + 0.007 * z * z * z;
     // approx is a probit-scale linear combination → CDF.
     let n = Normal::new(0.0, 1.0).unwrap();
