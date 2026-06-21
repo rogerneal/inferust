@@ -10,7 +10,7 @@
 
 mod common;
 
-use common::{as_f64_vec, as_f64_matrix, assert_parity, check_vec, load_fixture, xy};
+use common::{as_f64_matrix, as_f64_vec, assert_parity, check_vec, load_fixture, xy};
 use inferust::regression::{RecursiveOls, RollingOls};
 
 #[test]
@@ -64,7 +64,11 @@ fn parity_recursive_ols() {
         .expect("RecursiveOls fit failed");
 
     let n = y.len();
-    assert_eq!(result.coefficients.len(), n, "coefficient path length mismatch");
+    assert_eq!(
+        result.coefficients.len(),
+        n,
+        "coefficient path length mismatch"
+    );
     assert_eq!(result.cusum.len(), n, "cusum path length mismatch");
 
     // Compare coefficients at specific time indices against statsmodels.
