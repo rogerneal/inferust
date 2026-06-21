@@ -2,7 +2,7 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
-## [Unreleased]
+## [0.1.13] - 2026-06-21
 
 ### Added
 

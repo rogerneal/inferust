@@ -104,7 +104,8 @@ pub fn mann_whitney(a: &[f64], b: &[f64]) -> Result<MannWhitneyResult> {
     let n = total as f64;
     let tie_correction = tie_correction_factor(&ranks, n);
     let sigma_u = ((n1 as f64 * n2 as f64 / 12.0) * (n + 1.0 - tie_correction)).sqrt();
-    let z = (u - mu_u - 0.5).abs() / sigma_u.max(f64::EPSILON);
+    // Continuity correction: subtract 0.5 from |U - mu| (always moves toward zero).
+    let z = ((u - mu_u).abs() - 0.5).max(0.0) / sigma_u.max(f64::EPSILON);
     let normal = Normal::new(0.0, 1.0)
         .map_err(|_| InferustError::InvalidInput("normal distribution error".into()))?;
     let p = 2.0 * (1.0 - normal.cdf(z));

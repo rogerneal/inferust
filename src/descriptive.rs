@@ -38,16 +38,18 @@ impl Summary {
         let q1 = percentile(&sorted, 0.25);
         let q3 = percentile(&sorted, 0.75);
 
-        // Skewness and excess kurtosis use population moments (divided by n).
-        let skewness = if std == 0.0 {
+        // Skewness and excess kurtosis use population std (ddof=0) to match
+        // scipy.stats.skew/kurtosis with bias=True.
+        let pop_std = (data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n as f64).sqrt();
+        let skewness = if pop_std == 0.0 {
             0.0
         } else {
-            data.iter().map(|x| ((x - mean) / std).powi(3)).sum::<f64>() / n as f64
+            data.iter().map(|x| ((x - mean) / pop_std).powi(3)).sum::<f64>() / n as f64
         };
-        let kurtosis = if std == 0.0 {
+        let kurtosis = if pop_std == 0.0 {
             0.0
         } else {
-            data.iter().map(|x| ((x - mean) / std).powi(4)).sum::<f64>() / n as f64 - 3.0
+            data.iter().map(|x| ((x - mean) / pop_std).powi(4)).sum::<f64>() / n as f64 - 3.0
         };
 
         Ok(Summary {
