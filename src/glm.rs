@@ -131,13 +131,7 @@ impl LogisticResult {
         r: &[Vec<f64>],
         q: &[f64],
     ) -> Result<crate::hypothesis::WaldTestResult> {
-        crate::hypothesis::wald_linear(
-            &self.coefficients,
-            &self.covariance_matrix,
-            r,
-            q,
-            None,
-        )
+        crate::hypothesis::wald_linear(&self.coefficients, &self.covariance_matrix, r, q, None)
     }
 
     /// Average marginal effects for each non-intercept predictor.
@@ -619,13 +613,7 @@ impl PoissonResult {
         r: &[Vec<f64>],
         q: &[f64],
     ) -> Result<crate::hypothesis::WaldTestResult> {
-        crate::hypothesis::wald_linear(
-            &self.coefficients,
-            &self.covariance_matrix,
-            r,
-            q,
-            None,
-        )
+        crate::hypothesis::wald_linear(&self.coefficients, &self.covariance_matrix, r, q, None)
     }
 
     /// Linear predictor values for raw X rows, without the intercept column.
@@ -1053,13 +1041,7 @@ impl GammaResult {
         r: &[Vec<f64>],
         q: &[f64],
     ) -> Result<crate::hypothesis::WaldTestResult> {
-        crate::hypothesis::wald_linear(
-            &self.coefficients,
-            &self.covariance_matrix,
-            r,
-            q,
-            None,
-        )
+        crate::hypothesis::wald_linear(&self.coefficients, &self.covariance_matrix, r, q, None)
     }
 
     /// Linear predictor values for raw X rows, without the intercept column.
@@ -1631,7 +1613,9 @@ fn gamma_log_likelihood(y: &[f64], fitted: &[f64], dispersion: f64) -> f64 {
         .map(|(yi, mui)| {
             let mu = mui.max(1e-12);
             let theta = scale * mu;
-            (shape - 1.0) * yi.ln() - yi / theta - shape * theta.ln()
+            (shape - 1.0) * yi.ln()
+                - yi / theta
+                - shape * theta.ln()
                 - statrs::function::gamma::ln_gamma(shape)
         })
         .sum()
@@ -2085,11 +2069,7 @@ mod tests {
             0.007274298836052154,
             0.018165634336352685,
         ];
-        let expected_z = [
-            11.015495356986674,
-            -1.3094012250054228,
-            -2.5234852357735544,
-        ];
+        let expected_z = [11.015495356986674, -1.3094012250054228, -2.5234852357735544];
         let expected_p = [
             3.2176180916993663e-28,
             0.19039847674504373,
@@ -2232,8 +2212,7 @@ mod tests {
         for (actual, expected) in result.p_values.iter().zip(expected_p) {
             assert_close(*actual, expected, 1e-5);
         }
-        for (actual_row, expected_row) in result.covariance_matrix.iter().zip(expected_covariance)
-        {
+        for (actual_row, expected_row) in result.covariance_matrix.iter().zip(expected_covariance) {
             for (actual, expected) in actual_row.iter().zip(expected_row) {
                 assert_close(*actual, expected, 1e-6);
             }
@@ -2292,7 +2271,11 @@ mod tests {
         assert_eq!(result.link(), GammaLink::Log);
 
         let expected_coefficients = [0.8279544833007723, 0.12756958824671266, 0.3406066677268939];
-        let expected_std_errors = [0.09433281030458336, 0.04352065619887482, 0.10677437685161423];
+        let expected_std_errors = [
+            0.09433281030458336,
+            0.04352065619887482,
+            0.10677437685161423,
+        ];
         let expected_fitted = [
             3.0827664916543105,
             3.6393103516014667,

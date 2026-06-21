@@ -600,7 +600,11 @@ pub fn wilcoxon_signed_rank(a: &[f64], b: &[f64]) -> Result<WilcoxonSignedRankRe
     }
 
     // Rank absolute differences with midranks for ties.
-    let mut indexed: Vec<(f64, usize)> = diffs.iter().enumerate().map(|(i, &d)| (d.abs(), i)).collect();
+    let mut indexed: Vec<(f64, usize)> = diffs
+        .iter()
+        .enumerate()
+        .map(|(i, &d)| (d.abs(), i))
+        .collect();
     indexed.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     let mut ranks = vec![0.0_f64; n];
     let mut i = 0;
@@ -1020,7 +1024,11 @@ mod tests {
         let a: Vec<f64> = (1..=15).map(|i| i as f64).collect();
         let b: Vec<f64> = a.iter().map(|v| v + 3.0).collect();
         let res = wilcoxon_signed_rank(&a, &b).unwrap();
-        assert!(res.p_value < 0.001, "shift should be detected; p={}", res.p_value);
+        assert!(
+            res.p_value < 0.001,
+            "shift should be detected; p={}",
+            res.p_value
+        );
         assert_eq!(res.n, 15);
     }
 

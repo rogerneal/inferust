@@ -44,12 +44,19 @@ impl Summary {
         let skewness = if pop_std == 0.0 {
             0.0
         } else {
-            data.iter().map(|x| ((x - mean) / pop_std).powi(3)).sum::<f64>() / n as f64
+            data.iter()
+                .map(|x| ((x - mean) / pop_std).powi(3))
+                .sum::<f64>()
+                / n as f64
         };
         let kurtosis = if pop_std == 0.0 {
             0.0
         } else {
-            data.iter().map(|x| ((x - mean) / pop_std).powi(4)).sum::<f64>() / n as f64 - 3.0
+            data.iter()
+                .map(|x| ((x - mean) / pop_std).powi(4))
+                .sum::<f64>()
+                / n as f64
+                - 3.0
         };
 
         Ok(Summary {
