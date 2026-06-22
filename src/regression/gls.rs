@@ -148,9 +148,10 @@ impl Gls {
             .map(|(yi, fi)| yi - fi)
             .collect();
 
-        // σ² from transformed residuals
+        // σ² = e'Ω⁻¹e / df  (direct computation avoids cancellation errors)
         let e_vec = DVector::from_column_slice(&resids);
-        let ssr_t = e_vec.dot(&omega_inv_y) - beta.dot(&xto_y); // y'Ω⁻¹y - β'X'Ω⁻¹y
+        let omega_inv_e = chol.solve(&e_vec);
+        let ssr_t = e_vec.dot(&omega_inv_e);
         let df_resid = n.saturating_sub(ncols);
         let sigma2 = if df_resid > 0 {
             ssr_t.abs() / df_resid as f64
