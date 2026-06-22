@@ -2,6 +2,36 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.1.15] - 2026-06-22
+
+### Fixed
+
+- **`GammaLink::Identity` IRLS divergence** — linear predictor `eta` is now
+  clamped to `1e-8` after each IRLS update, keeping it in the Gamma
+  distribution's support and preventing divergence when early iterates go
+  negative.
+- **`GEE` working correlation** — replaced the independence-only stub with a
+  full GEE estimator supporting `Independence`, `Exchangeable`, and `AR(1)`
+  working correlation structures. Standard errors are now the empirical
+  sandwich estimator, valid even when the working correlation is
+  mis-specified. Result type changed to `GeeResult` (flat struct) with
+  `coefficients`, `robust_std_errors`, `z_statistics`, `p_values`, `rho`,
+  and `cluster_count`.
+- **`MixedLinearModel` variance-component estimation** — replaced the
+  group-mean-residual stub with an EM-algorithm REML estimator for
+  random-intercept LMMs. Now reports variance components (`var_random`,
+  `var_residual`, `icc`), EBLUP random intercepts, GLS-based fixed-effect
+  standard errors, t/p values, and approximate REML log-likelihood.
+  `MixedLinearResult` now carries `coefficients`, `std_errors`,
+  `t_statistics`, `p_values`, `variance_components`, `iterations`, and
+  `reml_loglik`.
+- **`RobustLinearModel` standard errors** — added sandwich (HC) standard
+  errors computed from the M-estimator bread (`X'WX`) and meat (`X'ψ²X`).
+  `RobustLinearResult` now exposes `robust_std_errors`, `robust_t_statistics`,
+  and `robust_p_values` alongside the existing WLS-derived `fit.std_errors`.
+- **`docs/parity.md`** — removed stale GLS "bse/t/p excluded" note (that
+  sigma² bug was fixed in 0.1.14).
+
 ## [0.1.14] - 2026-06-21
 
 ### Added
