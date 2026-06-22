@@ -1271,7 +1271,16 @@ impl Gamma {
                 .fold(0.0_f64, f64::max);
             beta = new_beta;
             let eta_vec = &x_mat * &beta;
-            eta = eta_vec.iter().cloned().collect();
+            eta = eta_vec
+                .iter()
+                .map(|&v| {
+                    if matches!(self.link, GammaLink::Identity) {
+                        v.max(1e-8)
+                    } else {
+                        v
+                    }
+                })
+                .collect();
             if max_delta < self.tolerance {
                 converged = true;
                 break;
@@ -1338,6 +1347,8 @@ impl Gamma {
 
         let log_likelihood = gamma_log_likelihood(y, &fitted_values, dispersion);
         let null_fitted = vec![y_mean; n];
+        // Use the full model's dispersion for the null LL — standard GLM practice
+        // (statsmodels also uses the full-model scale in GLMResults.llnull).
         let null_log_likelihood = gamma_log_likelihood(y, &null_fitted, dispersion);
         let pseudo_r_squared = 1.0 - log_likelihood / null_log_likelihood;
         let deviance = gamma_deviance(y, &fitted_values);
