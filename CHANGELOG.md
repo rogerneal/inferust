@@ -2,6 +2,17 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.1.16] - 2026-06-22
+
+### Added
+
+- **Discrete choice models — full MLE rewrites** (`src/discrete.rs`):
+  - `Probit` — IRLS with Fisher scoring weights φ²/(Φ(1−Φ)), proper SE/z/p/AIC/BIC/pseudo-R²
+  - `NegativeBinomial` — NB2 alternating IRLS (β) + Newton (overdispersion α); uses `digamma` for score; log-likelihood reported
+  - `MultinomialLogit` — true K-class softmax Newton-Raphson (not one-vs-rest); log-sum-exp stable; full (K-1)p×(K-1)p Hessian
+  - `OrderedLogit` — proportional-odds model; reparameterized cutpoints (log-gap encoding) for ordering constraint; gradient ascent with Armijo backtracking line search; BHHH outer-product covariance
+  - `ZeroInflatedPoisson` — EM algorithm; E-step posterior structural-zero probabilities; M-step weighted IRLS for count and inflation models
+
 ## [0.1.15] - 2026-06-22
 
 ### Fixed
