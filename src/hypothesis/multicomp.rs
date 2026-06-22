@@ -149,7 +149,7 @@ pub fn adjust(p_values: &[f64], alpha: f64, method: MultiTestMethod) -> Result<M
     for (rank, &orig_idx) in order.iter().enumerate() {
         let corrected = corrected_sorted[rank].min(1.0);
         p_values_corrected[orig_idx] = corrected;
-        reject[orig_idx] = corrected <= alpha;
+        reject[orig_idx] = corrected < alpha;
     }
 
     let alpha_bonferroni = alpha / n as f64;

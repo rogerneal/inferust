@@ -42,11 +42,19 @@ fn parity_gls_ar1() {
                 &as_f64_vec(&fx["params"]),
                 1e-6,
             ),
-            // NOTE: bse, t-stats and p-values diverge from statsmodels because
-            // inferust's sigma² formula in Gls uses `resid' * Ω⁻¹ * y - β' * X'Ω⁻¹y`
-            // instead of the correct `y' * Ω⁻¹ * y - β' * X'Ω⁻¹y`.  The coefficient
-            // estimates are unaffected (bse is ~2.5x off, t-stats proportionally off).
-            // Tracked as a known gap; only params are checked here.
+            check_vec("bse", &result.std_errors, &as_f64_vec(&fx["bse"]), 1e-6),
+            check_vec(
+                "tvalues",
+                &result.t_statistics,
+                &as_f64_vec(&fx["tvalues"]),
+                1e-6,
+            ),
+            check_vec(
+                "pvalues",
+                &result.p_values,
+                &as_f64_vec(&fx["pvalues"]),
+                1e-6,
+            ),
         ],
     );
 }
