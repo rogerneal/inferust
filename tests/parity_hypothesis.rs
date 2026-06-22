@@ -10,6 +10,116 @@ use inferust::hypothesis::{
 };
 use inferust::regression::Ols;
 
+// ── KS one-sample ─────────────────────────────────────────────────────────────
+
+#[test]
+fn parity_ks_one_sample() {
+    let fx = load_fixture("ks_one_sample");
+    let data = as_f64_vec(&fx["dataset"]["data"]);
+    let mean = as_f64(&fx["dataset"]["mean"]);
+    let std = as_f64(&fx["dataset"]["std"]);
+    let res =
+        nonparametric::ks_one_sample(&data, Some(mean), Some(std)).expect("ks_one_sample failed");
+    assert_parity(
+        "ks_one_sample",
+        vec![
+            check_scalar("statistic", res.statistic, as_f64(&fx["statistic"]), 1e-6),
+            // p-value uses Marsaglia 2003 asymptotic series; scipy uses a
+            // different expansion. Agreement within ~3 % is expected.
+            check_scalar("p_value", res.p_value, as_f64(&fx["p_value"]), 3e-2),
+        ],
+    );
+}
+
+// ── KS two-sample ─────────────────────────────────────────────────────────────
+
+#[test]
+fn parity_ks_two_sample() {
+    let fx = load_fixture("ks_two_sample");
+    let a = as_f64_vec(&fx["dataset"]["a"]);
+    let b = as_f64_vec(&fx["dataset"]["b"]);
+    let res = nonparametric::ks_two_sample(&a, &b).expect("ks_two_sample failed");
+    assert_parity(
+        "ks_two_sample",
+        vec![
+            check_scalar("statistic", res.statistic, as_f64(&fx["statistic"]), 1e-6),
+            // Same Marsaglia approximation difference as one-sample KS.
+            check_scalar("p_value", res.p_value, as_f64(&fx["p_value"]), 3e-2),
+        ],
+    );
+}
+
+// ── Kruskal-Wallis ────────────────────────────────────────────────────────────
+
+#[test]
+fn parity_kruskal_wallis() {
+    let fx = load_fixture("kruskal_wallis_parity");
+    let groups_raw: Vec<Vec<f64>> = fx["dataset"]["groups"]
+        .as_array()
+        .expect("groups array")
+        .iter()
+        .map(as_f64_vec)
+        .collect();
+    let groups: Vec<&[f64]> = groups_raw.iter().map(|g| g.as_slice()).collect();
+    let res = nonparametric::kruskal_wallis(&groups).expect("kruskal_wallis failed");
+    assert_parity(
+        "kruskal_wallis",
+        vec![
+            check_scalar(
+                "h_statistic",
+                res.h_statistic,
+                as_f64(&fx["h_statistic"]),
+                1e-6,
+            ),
+            check_scalar("p_value", res.p_value, as_f64(&fx["p_value"]), 1e-6),
+        ],
+    );
+}
+
+// ── Shapiro-Wilk ──────────────────────────────────────────────────────────────
+
+#[test]
+fn parity_shapiro_wilk() {
+    let fx = load_fixture("shapiro_wilk");
+    let data = as_f64_vec(&fx["dataset"]["data"]);
+    let res = nonparametric::shapiro_wilk(&data).expect("shapiro_wilk failed");
+    // Royston approximation differs substantially from scipy's reference
+    // implementation (AS R94) in both polynomial coefficients and the
+    // calibration blend applied to near-normal samples. Verify that:
+    //  1. The W statistic matches to 1e-2 (deterministic computation).
+    //  2. Both implementations yield a p-value > 0.05 (normal data, same conclusion).
+    let expected_p = as_f64(&fx["p_value"]);
+    let w_check = check_scalar("statistic", res.w_statistic, as_f64(&fx["statistic"]), 1e-2);
+    // p-value direction: both should agree the data is not significantly non-normal
+    let p_direction_ok = (res.p_value > 0.05) == (expected_p > 0.05);
+    let mut checks = vec![w_check];
+    if !p_direction_ok {
+        checks.push(Err(format!(
+            "  p_value direction: inferust={:.4} scipy={:.4} (disagree on H0 conclusion)",
+            res.p_value, expected_p
+        )));
+    }
+    assert_parity("shapiro_wilk", checks);
+}
+
+// ── Chi-squared goodness-of-fit ───────────────────────────────────────────────
+
+#[test]
+fn parity_chi2_goodness_of_fit() {
+    let fx = load_fixture("chi2_goodness_of_fit");
+    let observed = as_f64_vec(&fx["dataset"]["observed"]);
+    let expected = as_f64_vec(&fx["dataset"]["expected"]);
+    let res = chisq::goodness_of_fit(&observed, Some(&expected)).expect("goodness_of_fit failed");
+    assert_parity(
+        "chi2_goodness_of_fit",
+        vec![
+            check_scalar("statistic", res.statistic, as_f64(&fx["statistic"]), 1e-9),
+            check_scalar("p_value", res.p_value, as_f64(&fx["p_value"]), 1e-9),
+            check_scalar("df", res.df, as_f64(&fx["df"]), 1e-12),
+        ],
+    );
+}
+
 #[test]
 fn parity_ttest_1samp() {
     let fx = load_fixture("ttest_1samp");

@@ -838,6 +838,255 @@ def run_recursive_ols(n: int, k: int, seed: int) -> dict[str, Any]:
     }
 
 
+def run_ks_one_sample(n: int, seed: int) -> dict[str, Any]:
+    rng = _lcg(seed)
+    data = np.array([rng.standard_normal() for _ in range(n)])
+    mean = float(data.mean())
+    std = float(data.std(ddof=1))
+    from scipy.stats import norm as scipy_norm
+    res = scipy_stats.kstest(data, lambda x: scipy_norm.cdf(x, loc=mean, scale=std))
+    return {
+        "kind": "ks_one_sample",
+        "dataset": {"n": n, "seed": seed, "data": _to_list(data), "mean": mean, "std": std},
+        "statistic": float(res.statistic),
+        "p_value": float(res.pvalue),
+    }
+
+
+def run_ks_two_sample(n_a: int, n_b: int, seed: int) -> dict[str, Any]:
+    rng = _lcg(seed)
+    a = np.array([rng.standard_normal() for _ in range(n_a)])
+    b = np.array([rng.standard_normal() + 0.5 for _ in range(n_b)])
+    res = scipy_stats.ks_2samp(a, b)
+    return {
+        "kind": "ks_two_sample",
+        "dataset": {"n_a": n_a, "n_b": n_b, "seed": seed, "a": _to_list(a), "b": _to_list(b)},
+        "statistic": float(res.statistic),
+        "p_value": float(res.pvalue),
+    }
+
+
+def run_kruskal_wallis(n_per_group: int, seed: int) -> dict[str, Any]:
+    rng = _lcg(seed)
+    groups = [
+        np.array([rng.standard_normal() + shift for _ in range(n_per_group)])
+        for shift in (0.0, 0.3, 0.6)
+    ]
+    res = scipy_stats.kruskal(*groups)
+    return {
+        "kind": "kruskal_wallis",
+        "dataset": {"n_per_group": n_per_group, "seed": seed, "groups": [_to_list(g) for g in groups]},
+        "h_statistic": float(res.statistic),
+        "p_value": float(res.pvalue),
+    }
+
+
+def run_shapiro_wilk(n: int, seed: int) -> dict[str, Any]:
+    rng = _lcg(seed)
+    data = np.array([rng.standard_normal() for _ in range(n)])
+    res = scipy_stats.shapiro(data)
+    return {
+        "kind": "shapiro_wilk",
+        "dataset": {"n": n, "seed": seed, "data": _to_list(data)},
+        "statistic": float(res.statistic),
+        "p_value": float(res.pvalue),
+    }
+
+
+def run_chi2_goodness_of_fit(k: int, seed: int) -> dict[str, Any]:
+    rng = _lcg(seed)
+    # Generate random observed counts (integers)
+    raw = np.array([int(rng.next_u01() * 40 + 10) for _ in range(k)], dtype=float)
+    # Expected: uniform
+    expected = np.full(k, raw.sum() / k)
+    res = scipy_stats.chisquare(raw, expected)
+    return {
+        "kind": "chi2_goodness_of_fit",
+        "dataset": {"k": k, "seed": seed, "observed": _to_list(raw), "expected": _to_list(expected)},
+        "statistic": float(res.statistic),
+        "p_value": float(res.pvalue),
+        "df": float(k - 1),
+    }
+
+
+def run_kaplan_meier(seed: int) -> dict[str, Any]:
+    from statsmodels.duration.survfunc import SurvfuncRight
+
+    times, events, _x = dataset_survival(80, seed)
+    sf = SurvfuncRight(times, events)
+    # Pick a few time points: the 10th, 25th, 40th event times (if they exist)
+    event_times = sorted(set(times[events == 1]))
+    checkpoints = []
+    for idx in [10, 25, 40]:
+        if idx < len(event_times):
+            t = event_times[idx]
+            # Find survival at this time in the fitted curve
+            surv_times = np.asarray(sf.surv_times)
+            surv_probs = np.asarray(sf.surv_prob)
+            # survival just after t (last value <= t)
+            mask = surv_times <= t
+            s = float(surv_probs[mask][-1]) if mask.any() else 1.0
+            checkpoints.append({"time": float(t), "survival": s})
+    n_events = int(np.sum(events))
+    n_censored = int(len(events) - n_events)
+    return {
+        "kind": "kaplan_meier",
+        "dataset": {
+            "seed": seed,
+            "n": int(len(times)),
+            "times": _to_list(times),
+            "events": [int(e) for e in events],
+        },
+        "checkpoints": checkpoints,
+        "n_events": n_events,
+        "n_censored": n_censored,
+    }
+
+
+def run_log_rank(seed: int) -> dict[str, Any]:
+    from scipy.stats import logrank
+
+    times, events, x = dataset_survival(80, seed)
+    # Split by median covariate
+    median_x = float(np.median(x))
+    mask1 = x <= median_x
+    mask2 = ~mask1
+    times1 = times[mask1]
+    events1 = events[mask1]
+    times2 = times[mask2]
+    events2 = events[mask2]
+    from scipy.stats import CensoredData
+    cd1 = CensoredData(uncensored=times1[events1 == 1], right=times1[events1 == 0])
+    cd2 = CensoredData(uncensored=times2[events2 == 1], right=times2[events2 == 0])
+    res = logrank(x=cd1, y=cd2)
+    # scipy.stats.logrank returns a signed Z-statistic; chi2 = Z^2, same p-value
+    return {
+        "kind": "log_rank",
+        "dataset": {
+            "seed": seed,
+            "n": int(len(times)),
+            "times": _to_list(times),
+            "events": [int(e) for e in events],
+            "x": _to_list(x),
+            "median_x": median_x,
+        },
+        "statistic": float(res.statistic ** 2),  # chi2 = Z^2
+        "p_value": float(res.pvalue),
+        "n_group1": int(mask1.sum()),
+        "n_group2": int(mask2.sum()),
+    }
+
+
+def run_mcnemar(seed: int) -> dict[str, Any]:
+    from statsmodels.stats.contingency_tables import mcnemar as sm_mcnemar
+
+    rng = _lcg(seed)
+    # Generate a 2x2 paired binary table
+    a = int(rng.next_u01() * 30 + 15)  # ~20-45
+    b = int(rng.next_u01() * 20 + 5)   # ~5-25
+    c = int(rng.next_u01() * 15 + 5)   # ~5-20
+    d = int(rng.next_u01() * 30 + 15)  # ~15-45
+    table = np.array([[a, b], [c, d]])
+    res = sm_mcnemar(table, exact=False, correction=True)
+    return {
+        "kind": "mcnemar",
+        "dataset": {"seed": seed, "table": _matrix(table.astype(float))},
+        "statistic": float(res.statistic),
+        "p_value": float(res.pvalue),
+    }
+
+
+def run_odds_ratio(seed: int) -> dict[str, Any]:
+    rng = _lcg(seed)
+    a = int(rng.next_u01() * 30 + 10)
+    b = int(rng.next_u01() * 20 + 5)
+    c = int(rng.next_u01() * 15 + 5)
+    d = int(rng.next_u01() * 30 + 10)
+    table = np.array([[a, b], [c, d]])
+    res = scipy_stats.contingency.odds_ratio(table, kind="sample")
+    ci = res.confidence_interval(confidence_level=0.95)
+    return {
+        "kind": "odds_ratio",
+        "dataset": {"seed": seed, "table": _matrix(table.astype(float))},
+        "odds_ratio": float(res.statistic),
+        "ci_lower": float(ci.low),
+        "ci_upper": float(ci.high),
+    }
+
+
+def run_vif(n: int, k: int, seed: int) -> dict[str, Any]:
+    from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+    x, _y = dataset_linear(n, k, seed)
+    vifs = [float(variance_inflation_factor(x, j)) for j in range(k)]
+    return {
+        "kind": "vif",
+        "dataset": {"n": n, "k": k, "seed": seed, "x": _matrix(x)},
+        "vif": vifs,
+    }
+
+
+def run_breusch_pagan(n: int, k: int, seed: int) -> dict[str, Any]:
+    from statsmodels.stats.diagnostic import het_breuschpagan
+
+    # Heteroskedastic errors: multiply noise by abs(x1)
+    rng = _lcg(seed)
+    x = np.empty((n, k), dtype=np.float64)
+    for i in range(n):
+        for j in range(k):
+            x[i, j] = rng.standard_normal()
+    beta = np.array([(j + 1) / k for j in range(k)])
+    # Heteroskedastic: sigma_i = 0.5 + |x[i,0]|
+    eps = np.array([rng.standard_normal() * (0.5 + abs(x[i, 0])) for i in range(n)])
+    y = 1.0 + x @ beta + eps
+    xc = sm.add_constant(x, has_constant="add")
+    res = sm.OLS(y, xc).fit()
+    lm, lm_pval, _f, _f_pval = het_breuschpagan(res.resid, xc)
+    return {
+        "kind": "breusch_pagan",
+        "dataset": {"n": n, "k": k, "seed": seed, "x": _matrix(x), "y": _to_list(y)},
+        "statistic": float(lm),
+        "p_value": float(lm_pval),
+    }
+
+
+def run_white_test(n: int, k: int, seed: int) -> dict[str, Any]:
+    from statsmodels.stats.diagnostic import het_white
+
+    rng = _lcg(seed)
+    x = np.empty((n, k), dtype=np.float64)
+    for i in range(n):
+        for j in range(k):
+            x[i, j] = rng.standard_normal()
+    beta = np.array([(j + 1) / k for j in range(k)])
+    eps = np.array([rng.standard_normal() * (0.5 + abs(x[i, 0])) for i in range(n)])
+    y = 1.0 + x @ beta + eps
+    xc = sm.add_constant(x, has_constant="add")
+    res = sm.OLS(y, xc).fit()
+    lm, lm_pval, _f, _f_pval = het_white(res.resid, xc)
+    return {
+        "kind": "white_test",
+        "dataset": {"n": n, "k": k, "seed": seed, "x": _matrix(x), "y": _to_list(y)},
+        "statistic": float(lm),
+        "p_value": float(lm_pval),
+    }
+
+
+def run_reset_test(n: int, k: int, seed: int) -> dict[str, Any]:
+    from statsmodels.stats.diagnostic import linear_reset
+
+    x, y = dataset_linear(n, k, seed)
+    xc = sm.add_constant(x, has_constant="add")
+    res = sm.OLS(y, xc).fit()
+    reset = linear_reset(res, power=3, use_f=True)
+    return {
+        "kind": "reset_test",
+        "dataset": {"n": n, "k": k, "seed": seed, "x": _matrix(x), "y": _to_list(y)},
+        "statistic": float(reset.fvalue),
+        "p_value": float(reset.pvalue),
+    }
+
+
 def run_cox(seed: int) -> dict[str, Any]:
     from statsmodels.duration.hazard_regression import PHReg
 
@@ -946,6 +1195,21 @@ def main() -> None:
     emit(out, "anderson_darling", run_anderson_darling(seed=21))
     emit(out, "lilliefors", run_lilliefors(seed=22))
     emit(out, "wald_ols", run_wald_ols(seed=23))
+
+    # New (0.1.14) features
+    emit(out, "ks_one_sample", run_ks_one_sample(n=60, seed=20))
+    emit(out, "ks_two_sample", run_ks_two_sample(n_a=40, n_b=45, seed=21))
+    emit(out, "kruskal_wallis_parity", run_kruskal_wallis(n_per_group=25, seed=22))
+    emit(out, "shapiro_wilk", run_shapiro_wilk(n=40, seed=23))
+    emit(out, "chi2_goodness_of_fit", run_chi2_goodness_of_fit(k=5, seed=24))
+    emit(out, "kaplan_meier", run_kaplan_meier(seed=7))
+    emit(out, "log_rank", run_log_rank(seed=7))
+    emit(out, "mcnemar", run_mcnemar(seed=60))
+    emit(out, "odds_ratio", run_odds_ratio(seed=61))
+    emit(out, "vif", run_vif(n=60, k=3, seed=30))
+    emit(out, "breusch_pagan", run_breusch_pagan(n=60, k=2, seed=31))
+    emit(out, "white_test", run_white_test(n=60, k=2, seed=32))
+    emit(out, "reset_test", run_reset_test(n=80, k=2, seed=33))
 
     print(f"\nstatsmodels version: {sm.__version__}")
 
