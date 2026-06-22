@@ -2,6 +2,35 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.1.14] - 2026-06-21
+
+### Added
+
+- **Parity coverage — nonparametric tests**: `ks_one_sample`, `ks_two_sample`,
+  `kruskal_wallis`, `shapiro_wilk` now have scipy reference fixtures and
+  integration tests in `tests/parity_hypothesis.rs`.
+- **Parity coverage — chi-squared goodness-of-fit**: `hypothesis::chisq::goodness_of_fit`
+  now tested against `scipy.stats.chisquare`.
+- **Parity coverage — survival**: `KaplanMeier` (survival probabilities, n_events,
+  n_censored) and `log_rank_test` (χ² statistic, p-value) now tested against
+  `statsmodels.duration.survfunc.SurvfuncRight` and `scipy.stats.logrank` in
+  `tests/parity_survival.rs`.
+- **Parity coverage — contingency tables**: `mcnemar` and `odds_ratio_ci` / `table2x2`
+  now tested against `statsmodels.stats.contingency_tables.mcnemar` and
+  `scipy.stats.contingency.odds_ratio` in `tests/parity_contingency.rs`.
+- **Parity coverage — diagnostics**: `variance_inflation_factors`, `breusch_pagan`,
+  `white_test`, and `reset_test` now tested against statsmodels equivalents in
+  `tests/parity_diagnostics.rs`.
+
+### Notes
+
+- KS p-values differ by up to 3 % from scipy due to different asymptotic series
+  (Marsaglia 2003 vs. scipy's implementation); tolerances documented in test file.
+- Shapiro-Wilk p-values differ substantially (Royston approximation vs. AS R94);
+  tests verify W-statistic agreement and directional p-value agreement only.
+- VIF differs by < 1 % because statsmodels always adds an intercept to the
+  auxiliary regression while inferust does not.
+
 ## [0.1.13] - 2026-06-21
 
 ### Added

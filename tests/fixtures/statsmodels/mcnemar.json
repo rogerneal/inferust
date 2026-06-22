@@ -1,0 +1,18 @@
+{
+ "dataset": {
+  "seed": 60,
+  "table": [
+   [
+    15.0,
+    7.0
+   ],
+   [
+    6.0,
+    29.0
+   ]
+  ]
+ },
+ "kind": "mcnemar",
+ "p_value": 1.0,
+ "statistic": 0.0
+}

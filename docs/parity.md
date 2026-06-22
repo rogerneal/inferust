@@ -75,12 +75,25 @@ modules that have at least one parity fixture today; modules listed under
 | `correlation` | `pearson_spearman` | `pearson`, `spearman` | r | pending first run |
 | `descriptive` | `descriptive` | `Summary` | mean, std, var, quartiles, skew, kurtosis | pending first run |
 | `survival` | `cox_ph` | `CoxPh` (Breslow ties) | params, bse, z, p, llf | pending first run |
+| `survival` | `kaplan_meier` | `KaplanMeier` | n_events, n_censored, survival at 3 checkpoints (tol 1e-6) | passing |
+| `survival` | `log_rank` | `log_rank_test` | χ² statistic, p (tol 1e-4) | passing |
 | `time_series` | `granger_causality` | `granger_causality` | F, p at lag 2 | pending first run |
 | `time_series` | `engle_granger` | `engle_granger` | second-stage ADF t-stat | pending first run |
 | `hypothesis` | `wilcoxon` | `wilcoxon_signed_rank` | W statistic, asymptotic p | pending first run (p loose) |
 | `hypothesis` | `sign_test` | `sign_test` | counts + exact two-sided binomial p | pending first run |
 | `hypothesis` | `anderson_darling` | `anderson_darling` | raw A² (matches scipy `anderson`) | pending first run |
 | `hypothesis` | `lilliefors` | `lilliefors` | D statistic only (different p-value approx) | pending first run |
+| `hypothesis` | `ks_one_sample` | `nonparametric::ks_one_sample` | D statistic (1e-6), p-value (3e-2 — Marsaglia vs scipy expansion) | passing |
+| `hypothesis` | `ks_two_sample` | `nonparametric::ks_two_sample` | D statistic (1e-6), p-value (3e-2 — Marsaglia vs scipy expansion) | passing |
+| `hypothesis` | `kruskal_wallis_parity` | `nonparametric::kruskal_wallis` | H statistic (1e-6), p (1e-6) | passing |
+| `hypothesis` | `shapiro_wilk` | `nonparametric::shapiro_wilk` | W (1e-2), directional p agreement (Royston vs AS R94) | passing |
+| `hypothesis` | `chi2_goodness_of_fit` | `chisq::goodness_of_fit` | χ², p, df (1e-9) | passing |
+| `contingency` | `mcnemar` | `mcnemar` | statistic, p (1e-6) | passing |
+| `contingency` | `odds_ratio` | `table2x2`, `odds_ratio_ci` | odds_ratio (1e-9), CI bounds (loose — Wald vs Fisher exact) | passing |
+| `diagnostics` | `vif` | `variance_inflation_factors` | VIF per predictor (1e-2 — intercept in aux regression gap) | passing |
+| `diagnostics` | `breusch_pagan` | `breusch_pagan` | LM statistic, p (1e-4) | passing |
+| `diagnostics` | `white_test` | `white_test` | LM statistic, p (1e-4) | passing |
+| `diagnostics` | `reset_test` | `reset_test` | F statistic, p (1e-4) | passing |
 | `hypothesis::wald` | `wald_ols` | `OlsResult::wald_test` | χ² & F statistics + both p-values | pending first run |
 | `hypothesis::multicomp` | `multicomp` | `adjust` (Bonferroni, Holm, BH, BY) | p_corrected, reject, alpha_bonferroni, alpha_sidak, for all four methods | pending first run |
 | `hypothesis::tukey` | `tukey_hsd` | `tukey_hsd` | mean_diff (sign-flipped vs. statsmodels' convention), std_error, q_crit, p-value, CI bounds, df_within | pending first run |
@@ -154,12 +167,7 @@ estimators.
   auditing the generic dispatch wrapper.)
 - **`discrete`** — Probit, ordered logit, negative binomial, multinomial logit, zero-inflated Poisson; each maps to a `statsmodels.discrete` class.
 - **`time_series::Var` / `Sarima` / `Sarimax` / `Vecm` / `Varmax`** — large surface, lowest-priority numerical parity because of multiple optimiser choices.
-- **`hypothesis::nonparametric` (KS, Kruskal-Wallis, Shapiro-Wilk)** — closed-form, easy to add.
-- **`hypothesis::chisq::goodness_of_fit`** — closed form.
-- **`contingency`** — McNemar, CMH, odds-ratio CIs.
-- **`survival` Kaplan-Meier / log-rank** — closed form, should be tight.
 - **`multivariate`** — MANOVA, PCA; PCA in particular against `statsmodels.multivariate.pca.PCA`.
-- **`diagnostics`** — VIF, Breusch-Pagan, White, RESET.
 - **`gam`, `gee`, `gmm`, `mixed`, `robust`, `imputation`, `treatment`** — lower priority; each needs a dedicated fixture.
 
 ## Process for adding a new estimator to the audit
