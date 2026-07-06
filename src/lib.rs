@@ -12,7 +12,7 @@
 //! | [`gmm`] | Instrumental variables / 2SLS econometrics starter |
 //! | [`survival`] | Kaplan-Meier estimator, log-rank test, Cox proportional hazards regression |
 //! | [`statespace`] | Scalar Kalman filter and local-level state-space model |
-//! | [`time_series`] | ARIMA/SARIMA/SARIMAX via CSS, VAR/VECM/VARMAX, AR, ACF/PACF, Ljung-Box, ADF unit root, KPSS stationarity, Granger causality, Engle-Granger cointegration |
+//! | [`time_series`] | ARIMA/SARIMA/SARIMAX via CSS or exact state-space MLE, VAR/VECM/VARMAX, AR, ACF/PACF, Ljung-Box, ADF unit root, KPSS stationarity, Granger causality, Engle-Granger cointegration |
 //! | [`hypothesis`] | t-tests, chi-squared, ANOVA, Tukey HSD post-hoc, multiple-testing corrections (Bonferroni/Holm/BH/BY), Mann-Whitney U, Kruskal-Wallis, Wilcoxon signed-rank, sign test, KS tests, Shapiro-Wilk, Anderson-Darling, Lilliefors, Wald linear-restriction tests |
 //! | [`contingency`] | 2x2 tables, odds/risk ratios, McNemar, CMH |
 //! | [`diagnostics`] | VIF, Breusch-Pagan, White, and RESET diagnostics |
@@ -90,7 +90,10 @@ pub mod imputation;
 mod irls;
 pub mod mixed;
 pub mod multivariate;
+pub mod panel;
 pub mod plot;
+pub mod polars_bridge;
+pub mod post_estimation;
 pub mod regression;
 pub mod robust;
 pub mod statespace;

@@ -1087,6 +1087,214 @@ def run_reset_test(n: int, k: int, seed: int) -> dict[str, Any]:
     }
 
 
+def dataset_multinomial(n: int, k: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
+    """Three-class outcome from a softmax linear predictor."""
+    rng = _lcg(seed)
+    x = np.empty((n, k), dtype=np.float64)
+    for i in range(n):
+        for j in range(k):
+            x[i, j] = rng.standard_normal() * 0.5
+    beta0 = np.array([0.2, -0.3, 0.1][:k])
+    beta1 = np.array([-0.4, 0.2, 0.0][:k])
+    eta0 = 0.0 + x @ beta0
+    eta1 = 0.5 + x @ beta1
+    y = np.empty(n, dtype=np.float64)
+    for i in range(n):
+        e0 = math.exp(np.clip(eta0[i], -10.0, 10.0))
+        e1 = math.exp(np.clip(eta1[i], -10.0, 10.0))
+        z = 1.0 + e0 + e1
+        p0, p1 = 1.0 / z, e0 / z
+        u = rng.next_u01()
+        if u < p0:
+            y[i] = 0.0
+        elif u < p0 + p1:
+            y[i] = 1.0
+        else:
+            y[i] = 2.0
+    return x, y
+
+
+def dataset_ordered(n: int, k: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
+    """Ordinal 0/1/2 from latent linear index with cutpoints."""
+    rng = _lcg(seed)
+    x = np.empty((n, k), dtype=np.float64)
+    for i in range(n):
+        for j in range(k):
+            x[i, j] = rng.standard_normal() * 0.5
+    beta = np.array([0.4, -0.2, 0.1][:k])
+    eta = x @ beta + np.array([rng.standard_normal() * 0.25 for _ in range(n)])
+    y = np.zeros(n, dtype=np.float64)
+    y[eta > -0.5] = 1.0
+    y[eta > 0.8] = 2.0
+    return x, y
+
+
+def dataset_zip(n: int, k: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
+    """Count data with structural zeros for ZIP."""
+    rng = _lcg(seed)
+    x = np.empty((n, k), dtype=np.float64)
+    for i in range(n):
+        for j in range(k):
+            x[i, j] = rng.standard_normal() * 0.4
+    beta = np.array([0.25, -0.15, 0.05][:k])
+    eta = 0.3 + x @ beta
+    mu = np.exp(np.clip(eta, -3.0, 3.0))
+    y = np.zeros(n, dtype=np.float64)
+    for i in range(n):
+        if rng.next_u01() < 0.25:
+            y[i] = 0.0
+        else:
+            y[i] = float(_poisson_sample(rng, mu[i]))
+    return x, y
+
+
+def run_probit(n: int, k: int, seed: int) -> dict[str, Any]:
+    x, y = dataset_logit(n, k, seed)
+    xc = sm.add_constant(x, has_constant="add")
+    res = sm.Probit(y, xc).fit(disp=False, maxiter=200)
+    return {
+        "kind": "probit",
+        "dataset": {"n": n, "k": k, "seed": seed, **_xy_payload(x, y)},
+        "params": _to_list(res.params),
+        "bse": _to_list(res.bse),
+        "zvalues": _to_list(res.tvalues),
+        "pvalues": _to_list(res.pvalues),
+        "llf": float(res.llf),
+        "aic": float(res.aic),
+        "bic": float(res.bic),
+    }
+
+
+def dataset_negbin(n: int, k: int, seed: int, alpha: float = 0.8) -> tuple[np.ndarray, np.ndarray]:
+    """Overdispersed counts via Gamma–Poisson mixture (NB2)."""
+    rng = _lcg(seed)
+    x = np.empty((n, k), dtype=np.float64)
+    for i in range(n):
+        for j in range(k):
+            x[i, j] = rng.standard_normal() * 0.4
+    beta = np.array([0.35, -0.2, 0.1][:k])
+    eta = 0.4 + x @ beta
+    mu = np.exp(np.clip(eta, -2.0, 2.5))
+    y = np.empty(n, dtype=np.float64)
+    for i in range(n):
+        # NB2: draw Gamma(shape=1/alpha, scale=alpha*mu) then Poisson
+        g = rng.standard_normal()
+        lam = mu[i] * max(0.1, 1.0 + math.sqrt(alpha) * g)
+        y[i] = float(_poisson_sample(rng, lam))
+    return x, y
+
+
+def run_negbin(n: int, k: int, seed: int) -> dict[str, Any]:
+    x, y = dataset_negbin(n, k, seed)
+    xc = sm.add_constant(x, has_constant="add")
+    res = sm.NegativeBinomial(y, xc).fit(disp=False, maxiter=300, method="bfgs")
+    params = _to_list(res.params)
+    return {
+        "kind": "negbin",
+        "dataset": {"n": n, "k": k, "seed": seed, **_xy_payload(x, y)},
+        "params": params[:-1],
+        "alpha": float(params[-1]),
+        "bse": _to_list(res.bse)[:-1],
+        "zvalues": _to_list(res.tvalues)[:-1],
+        "pvalues": _to_list(res.pvalues)[:-1],
+        "llf": float(res.llf),
+        "aic": float(res.aic),
+        "bic": float(res.bic),
+    }
+
+
+def run_multinomial(n: int, k: int, seed: int) -> dict[str, Any]:
+    x, y = dataset_multinomial(n, k, seed)
+    xc = sm.add_constant(x, has_constant="add")
+    res = sm.MNLogit(y.astype(int), xc).fit(disp=False, maxiter=300)
+    return {
+        "kind": "multinomial",
+        "dataset": {"n": n, "k": k, "seed": seed, **_xy_payload(x, y)},
+        "params": _matrix(res.params),
+        "bse": _matrix(res.bse),
+        "llf": float(res.llf),
+        "aic": float(res.aic),
+        "bic": float(res.bic),
+    }
+
+
+def run_ordered_logit(n: int, k: int, seed: int) -> dict[str, Any]:
+    from statsmodels.miscmodels.ordinal_model import OrderedModel
+
+    x, y = dataset_ordered(n, k, seed)
+    res = OrderedModel(y.astype(int), x, distr="logit").fit(
+        disp=False, method="bfgs", maxiter=300
+    )
+    # statsmodels orders params as cutpoints then slopes for exog.
+    cutpoints = _to_list(res.params[: res.model.k_levels - 1])
+    slopes = _to_list(res.params[res.model.k_levels - 1 :])
+    bse = _to_list(res.bse)
+    cut_bse = bse[: res.model.k_levels - 1]
+    slope_bse = bse[res.model.k_levels - 1 :]
+    return {
+        "kind": "ordered_logit",
+        "dataset": {"n": n, "k": k, "seed": seed, **_xy_payload(x, y)},
+        "params": slopes,
+        "cutpoints": cutpoints,
+        "bse": slope_bse,
+        "cutpoint_bse": cut_bse,
+        "llf": float(res.llf),
+        "aic": float(res.aic),
+        "bic": float(res.bic),
+    }
+
+
+def run_zip(n: int, k: int, seed: int) -> dict[str, Any]:
+    from statsmodels.discrete.count_model import ZeroInflatedPoisson
+
+    x, y = dataset_zip(n, k, seed)
+    xc = sm.add_constant(x, has_constant="add")
+    res = ZeroInflatedPoisson(y, xc, exog_infl=xc, inflation="logit").fit(
+        disp=False, maxiter=300
+    )
+    # params: count block then inflation block (each with intercept).
+    q = xc.shape[1]
+    count_params = _to_list(res.params[:q])
+    infl_params = _to_list(res.params[q:])
+    count_bse = _to_list(res.bse[:q])
+    infl_bse = _to_list(res.bse[q:])
+    return {
+        "kind": "zip",
+        "dataset": {"n": n, "k": k, "seed": seed, **_xy_payload(x, y)},
+        "count_params": count_params,
+        "inflation_params": infl_params,
+        "count_bse": count_bse,
+        "inflation_bse": infl_bse,
+        "llf": float(res.llf),
+        "aic": float(res.aic),
+        "bic": float(res.bic),
+    }
+
+
+def run_gee_poisson(n: int, k: int, seed: int) -> dict[str, Any]:
+    from statsmodels.genmod.cov_struct import Exchangeable
+    from statsmodels.genmod.families import Poisson
+    from statsmodels.genmod.generalized_estimating_equations import GEE
+
+    x, y = dataset_poisson(n, k, seed)
+    xc = sm.add_constant(x, has_constant="add")
+    clusters = np.array([(i % 10) for i in range(n)], dtype=int)
+    res = GEE(y, xc, groups=clusters, family=Poisson(), cov_struct=Exchangeable()).fit()
+    return {
+        "kind": "gee_poisson",
+        "dataset": {
+            "n": n,
+            "k": k,
+            "seed": seed,
+            "clusters": clusters.tolist(),
+            **_xy_payload(x, y),
+        },
+        "params": _to_list(res.params),
+        "bse": _to_list(res.bse),
+        "llf": float(res.llf) if res.llf is not None else float("nan"),
+    }
+
+
 def run_cox(seed: int) -> dict[str, Any]:
     from statsmodels.duration.hazard_regression import PHReg
 
@@ -1106,198 +1314,6 @@ def run_cox(seed: int) -> dict[str, Any]:
         "zvalues": _to_list(res.tvalues),
         "pvalues": _to_list(res.pvalues),
         "llf": float(res.llf),
-    }
-
-
-def run_probit(n: int, k: int, seed: int) -> dict[str, Any]:
-    x, y = dataset_logit(n, k, seed)
-    xc = sm.add_constant(x, has_constant="add")
-    res = sm.Probit(y, xc).fit(disp=False)
-    return {
-        "kind": "probit",
-        "dataset": {"n": n, "k": k, "seed": seed, **_xy_payload(x, y)},
-        "params": _to_list(res.params),
-        "bse": _to_list(res.bse),
-        "zvalues": _to_list(res.tvalues),
-        "pvalues": _to_list(res.pvalues),
-        "llf": float(res.llf),
-        "llnull": float(res.llnull),
-        "prsquared": float(res.prsquared),
-        "aic": float(res.aic),
-        "bic": float(res.bic),
-    }
-
-
-def run_neg_binomial(n: int, k: int, seed: int) -> dict[str, Any]:
-    x, y = dataset_poisson(n, k, seed)
-    xc = sm.add_constant(x, has_constant="add")
-    res = sm.NegativeBinomial(y, xc).fit(disp=False)
-    return {
-        "kind": "neg_binomial",
-        "dataset": {"n": n, "k": k, "seed": seed, **_xy_payload(x, y)},
-        "params": _to_list(res.params),
-        "bse": _to_list(res.bse),
-        "zvalues": _to_list(res.tvalues),
-        "pvalues": _to_list(res.pvalues),
-        "alpha": float(np.exp(res.params[-1])) if hasattr(res, "lnalpha") else float(res.params[-1]),
-        "llf": float(res.llf),
-        "aic": float(res.aic),
-        "bic": float(res.bic),
-    }
-
-
-def run_ordered_logit(n: int, k: int, seed: int) -> dict[str, Any]:
-    rng = _lcg(seed)
-    x = np.empty((n, k), dtype=np.float64)
-    for i in range(n):
-        for j in range(k):
-            x[i, j] = rng.standard_normal()
-    beta = np.array([0.6, -0.4][:k])
-    eta = x @ beta + 0.3 * np.array([rng.standard_normal() for _ in range(n)])
-    y = np.array([0 if e < -0.5 else (1 if e < 0.5 else 2) for e in eta], dtype=int)
-    from statsmodels.miscmodels.ordinal_model import OrderedModel
-
-    res = OrderedModel(y, x, distr="logit").fit(disp=False, method="bfgs", maxiter=200)
-    return {
-        "kind": "ordered_logit",
-        "dataset": {
-            "n": n,
-            "k": k,
-            "seed": seed,
-            "x": _matrix(x),
-            "y": [int(v) for v in y],
-        },
-        "params": _to_list(res.params),
-        "bse": _to_list(res.bse),
-        "zvalues": _to_list(res.tvalues),
-        "pvalues": _to_list(res.pvalues),
-        "llf": float(res.llf),
-        "aic": float(res.aic),
-        "bic": float(res.bic),
-    }
-
-
-def run_mnlogit(n: int, k: int, seed: int) -> dict[str, Any]:
-    rng = _lcg(seed)
-    x = np.empty((n, k), dtype=np.float64)
-    for i in range(n):
-        for j in range(k):
-            x[i, j] = rng.standard_normal()
-    beta = np.array([[0.0, 0.5, -0.3], [0.0, -0.2, 0.8]])[:, :k]
-    eta = x @ beta.T
-    exp_eta = np.exp(eta - eta.max(axis=1, keepdims=True))
-    probs = exp_eta / exp_eta.sum(axis=1, keepdims=True)
-    y = np.array(
-        [int(np.searchsorted(np.cumsum(p), rng.next_u01())) for p in probs],
-        dtype=int,
-    )
-    xc = sm.add_constant(x, has_constant="add")
-    res = sm.MNLogit(y, xc).fit(disp=False, maxiter=200)
-    return {
-        "kind": "mnlogit",
-        "dataset": {
-            "n": n,
-            "k": k,
-            "seed": seed,
-            "x": _matrix(x),
-            "y": [int(v) for v in y],
-        },
-        "params": _to_list(res.params.flatten()),
-        "bse": _to_list(res.bse.flatten()),
-        "llf": float(res.llf),
-        "aic": float(res.aic),
-        "bic": float(res.bic),
-    }
-
-
-def run_zip(n: int, k: int, seed: int) -> dict[str, Any]:
-    from statsmodels.discrete.count_model import ZeroInflatedPoisson
-
-    x, y = dataset_poisson(n, k, seed)
-    # inflate zeros
-    rng = _lcg(seed + 99)
-    y = np.array([0.0 if rng.next_u01() < 0.15 else v for v in y], dtype=np.float64)
-    xc = sm.add_constant(x, has_constant="add")
-    res = ZeroInflatedPoisson(y, xc, exog_infl=xc).fit(disp=False, maxiter=100)
-    return {
-        "kind": "zip",
-        "dataset": {"n": n, "k": k, "seed": seed, **_xy_payload(x, y)},
-        "count_params": _to_list(res.params[: xc.shape[1]]),
-        "infl_params": _to_list(res.params[xc.shape[1] :]),
-        "llf": float(res.llf),
-        "aic": float(res.aic),
-        "bic": float(res.bic),
-    }
-
-
-def run_gee(n: int, k: int, seed: int) -> dict[str, Any]:
-    from statsmodels.genmod.generalized_estimating_equations import GEE
-    from statsmodels.genmod.families import Poisson
-    from statsmodels.genmod.cov_struct import Exchangeable
-
-    x, y = dataset_poisson(n, k, seed)
-    xc = sm.add_constant(x, has_constant="add")
-    groups = np.array([i // 10 for i in range(n)], dtype=int)
-    res = GEE(y, xc, groups=groups, family=Poisson(), cov_struct=Exchangeable()).fit()
-    return {
-        "kind": "gee",
-        "dataset": {
-            "n": n,
-            "k": k,
-            "seed": seed,
-            "x": _matrix(x),
-            "y": _to_list(y),
-            "groups": [int(g) for g in groups],
-        },
-        "params": _to_list(res.params),
-        "bse": _to_list(res.bse),
-        "zvalues": _to_list(res.tvalues),
-        "pvalues": _to_list(res.pvalues),
-    }
-
-
-def run_mixed(n: int, k: int, seed: int) -> dict[str, Any]:
-    import statsmodels.formula.api as smf
-
-    x, y = dataset_linear(n, k, seed)
-    groups = np.array([i // 20 for i in range(n)], dtype=int)
-    df = {
-        "y": y,
-        "x1": x[:, 0],
-        "group": groups,
-    }
-    if k > 1:
-        for j in range(1, k):
-            df[f"x{j+1}"] = x[:, j]
-    formula = "y ~ " + " + ".join([f"x{j+1}" for j in range(k)])
-    res = smf.mixedlm(formula, df, groups=df["group"]).fit(reml=True, disp=False)
-    return {
-        "kind": "mixed_lm",
-        "dataset": {
-            "n": n,
-            "k": k,
-            "seed": seed,
-            "x": _matrix(x),
-            "y": _to_list(y),
-            "groups": [int(g) for g in groups],
-        },
-        "params": _to_list(res.fe_params),
-        "bse": _to_list(res.bse_fe),
-        "llf": float(res.llf),
-    }
-
-
-def run_robust(n: int, k: int, seed: int) -> dict[str, Any]:
-    x, y = dataset_linear(n, k, seed)
-    xc = sm.add_constant(x, has_constant="add")
-    res = sm.RLM(y, xc, M=sm.robust.norms.HuberT()).fit()
-    return {
-        "kind": "robust_lm",
-        "dataset": {"n": n, "k": k, "seed": seed, **_xy_payload(x, y)},
-        "params": _to_list(res.params),
-        "bse": _to_list(res.bse),
-        "tvalues": _to_list(res.tvalues),
-        "pvalues": _to_list(res.pvalues),
     }
 
 
@@ -1403,15 +1419,13 @@ def main() -> None:
     emit(out, "white_test", run_white_test(n=60, k=2, seed=32))
     emit(out, "reset_test", run_reset_test(n=80, k=2, seed=33))
 
-    # Discrete / GEE / mixed / robust (0.1.17)
+    # Discrete choice (0.1.18)
     emit(out, "probit_small", run_probit(n=200, k=3, seed=44))
-    emit(out, "neg_binomial_small", run_neg_binomial(n=200, k=3, seed=45))
-    emit(out, "ordered_logit_small", run_ordered_logit(n=150, k=2, seed=46))
-    emit(out, "mnlogit_small", run_mnlogit(n=150, k=2, seed=47))
-    emit(out, "zip_small", run_zip(n=150, k=2, seed=48))
-    emit(out, "gee_small", run_gee(n=120, k=2, seed=49))
-    emit(out, "mixed_small", run_mixed(n=120, k=2, seed=50))
-    emit(out, "robust_small", run_robust(n=100, k=2, seed=51))
+    emit(out, "negbin_small", run_negbin(n=200, k=3, seed=45))
+    emit(out, "multinomial_small", run_multinomial(n=240, k=2, seed=46))
+    emit(out, "ordered_logit_small", run_ordered_logit(n=200, k=2, seed=47))
+    emit(out, "zip_small", run_zip(n=200, k=2, seed=48))
+    emit(out, "gee_poisson", run_gee_poisson(n=200, k=2, seed=49))
 
     print(f"\nstatsmodels version: {sm.__version__}")
 

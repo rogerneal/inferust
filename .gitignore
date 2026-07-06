@@ -7,3 +7,4 @@ __pycache__/
 .venv/
 bench/bench_*
 !bench/README.md
+.vscode/

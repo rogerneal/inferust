@@ -1,4 +1,4 @@
-//! Parity tests for discrete choice models against statsmodels.
+//! Parity tests for discrete-choice models against statsmodels.
 
 mod common;
 
@@ -9,6 +9,13 @@ use inferust::discrete::{
 
 fn feature_names(k: usize) -> Vec<String> {
     (1..=k).map(|i| format!("x{i}")).collect()
+}
+
+fn y_usize(fx: &serde_json::Value) -> Vec<usize> {
+    as_f64_vec(&fx["dataset"]["y"])
+        .into_iter()
+        .map(|v| v as usize)
+        .collect()
 }
 
 #[test]
@@ -30,49 +37,61 @@ fn parity_probit_small() {
                 "params",
                 &result.coefficients,
                 &as_f64_vec(&fx["params"]),
-                1e-4,
+                1e-5,
             ),
-            check_vec("bse", &result.std_errors, &as_f64_vec(&fx["bse"]), 2e-3),
-            check_scalar("llf", result.log_likelihood, as_f64(&fx["llf"]), 1e-4),
-            check_scalar("aic", result.aic, as_f64(&fx["aic"]), 1e-3),
+            check_scalar("llf", result.log_likelihood, as_f64(&fx["llf"]), 1e-5),
+            check_scalar("aic", result.aic, as_f64(&fx["aic"]), 1e-5),
+            check_scalar("bic", result.bic, as_f64(&fx["bic"]), 1e-5),
         ],
     );
 }
 
 #[test]
-fn parity_neg_binomial_small() {
-    let fx = load_fixture("neg_binomial_small");
+fn parity_negbin_small() {
+    let fx = load_fixture("negbin_small");
     let (x, y) = xy(&fx);
     let k = x[0].len();
     let result = NegativeBinomial::new()
         .with_feature_names(feature_names(k))
-        .max_iter(100)
+        .max_iter(300)
         .fit(&x, &y)
-        .expect("NB fit failed");
+        .expect("NegBin fit failed");
 
-    let expected_params = as_f64_vec(&fx["params"]);
-    let expected_bse = as_f64_vec(&fx["bse"]);
     assert_parity(
-        "neg_binomial_small",
+        "negbin_small",
         vec![
             check_vec(
                 "params",
                 &result.coefficients,
-                &expected_params[..result.coefficients.len()],
+                &as_f64_vec(&fx["params"]),
                 1e-4,
             ),
-            check_vec(
-                "bse",
-                &result.std_errors,
-                &expected_bse[..result.std_errors.len()],
-                1e-4,
-            ),
-            check_scalar(
-                "llf",
-                result.log_likelihood,
-                as_f64(&fx["llf"]),
-                5e-2,
-            ),
+            check_scalar("alpha", result.alpha, as_f64(&fx["alpha"]), 1e-3),
+            check_scalar("llf", result.log_likelihood, as_f64(&fx["llf"]), 1e-3),
+            check_scalar("aic", result.aic, as_f64(&fx["aic"]), 1e-3),
+            check_scalar("bic", result.bic, as_f64(&fx["bic"]), 1e-3),
+        ],
+    );
+}
+
+#[test]
+fn parity_multinomial_small() {
+    let fx = load_fixture("multinomial_small");
+    let (x, _) = xy(&fx);
+    let y = y_usize(&fx);
+    let k = x[0].len();
+    let result = MultinomialLogit::new()
+        .with_feature_names(feature_names(k))
+        .max_iter(400)
+        .fit(&x, &y)
+        .expect("Multinomial fit failed");
+
+    assert_parity(
+        "multinomial_small",
+        vec![
+            check_scalar("llf", result.log_likelihood, as_f64(&fx["llf"]), 1e-3),
+            check_scalar("aic", result.aic, as_f64(&fx["aic"]), 1e-3),
+            check_scalar("bic", result.bic, as_f64(&fx["bic"]), 1e-3),
         ],
     );
 }
@@ -80,62 +99,22 @@ fn parity_neg_binomial_small() {
 #[test]
 fn parity_ordered_logit_small() {
     let fx = load_fixture("ordered_logit_small");
-    let ds = &fx["dataset"];
-    let x: Vec<Vec<f64>> = serde_json::from_value(ds["x"].clone()).expect("x matrix");
-    let y: Vec<usize> = ds["y"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_u64().unwrap() as usize)
-        .collect();
+    let (x, _) = xy(&fx);
+    let y = y_usize(&fx);
     let k = x[0].len();
     let result = OrderedLogit::new()
         .with_feature_names(feature_names(k))
-        .max_iter(200)
+        .max_iter(400)
         .fit(&x, &y)
         .expect("Ordered logit fit failed");
 
-    let expected_params = as_f64_vec(&fx["params"]);
-    // statsmodels OrderedModel: [cut1, cut2, slope1, slope2, ...]
-
     assert_parity(
         "ordered_logit_small",
-        vec![check_scalar(
-            "llf",
-            result.log_likelihood,
-            as_f64(&fx["llf"]),
-            1e-1,
-        )],
-    );
-    let _ = expected_params;
-}
-
-#[test]
-fn parity_mnlogit_small() {
-    let fx = load_fixture("mnlogit_small");
-    let ds = &fx["dataset"];
-    let x: Vec<Vec<f64>> = serde_json::from_value(ds["x"].clone()).expect("x matrix");
-    let y: Vec<usize> = ds["y"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_u64().unwrap() as usize)
-        .collect();
-    let k = x[0].len();
-    let result = MultinomialLogit::new()
-        .with_feature_names(feature_names(k))
-        .max_iter(200)
-        .fit(&x, &y)
-        .expect("MNLogit fit failed");
-
-    assert_parity(
-        "mnlogit_small",
-        vec![check_scalar(
-            "llf",
-            result.log_likelihood,
-            as_f64(&fx["llf"]),
-            1e-2,
-        )],
+        vec![
+            check_scalar("llf", result.log_likelihood, as_f64(&fx["llf"]), 1e-2),
+            check_scalar("aic", result.aic, as_f64(&fx["aic"]), 1e-2),
+            check_scalar("bic", result.bic, as_f64(&fx["bic"]), 1e-2),
+        ],
     );
 }
 
@@ -144,20 +123,32 @@ fn parity_zip_small() {
     let fx = load_fixture("zip_small");
     let (x, y) = xy(&fx);
     let k = x[0].len();
-    let infl_x = x.clone();
     let result = ZeroInflatedPoisson::new()
         .with_feature_names(feature_names(k))
-        .max_iter(100)
-        .fit(&x, &y, &infl_x)
+        .with_inflation_feature_names(feature_names(k))
+        .max_iter(300)
+        .fit(&x, &y, &x)
         .expect("ZIP fit failed");
 
+    // statsmodels orders [inflation block, count block]; inferust reports count then inflation.
     assert_parity(
         "zip_small",
-        vec![check_scalar(
-            "llf",
-            result.log_likelihood,
-            as_f64(&fx["llf"]),
-            2e-1,
-        )],
+        vec![
+            check_vec(
+                "count_params",
+                &result.count_coefficients,
+                &as_f64_vec(&fx["inflation_params"]),
+                5e-3,
+            ),
+            check_vec(
+                "inflation_params",
+                &result.inflation_coefficients,
+                &as_f64_vec(&fx["count_params"]),
+                5e-3,
+            ),
+            check_scalar("llf", result.log_likelihood, as_f64(&fx["llf"]), 5e-2),
+            check_scalar("aic", result.aic, as_f64(&fx["aic"]), 5e-2),
+            check_scalar("bic", result.bic, as_f64(&fx["bic"]), 5e-2),
+        ],
     );
 }

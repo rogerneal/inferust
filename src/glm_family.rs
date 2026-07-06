@@ -14,6 +14,8 @@ pub enum GlmFamily {
     Binomial,
     Poisson,
     Gamma,
+    /// Positive continuous outcomes with inverse-Gaussian variance (dispatched via Gamma IRLS starter).
+    InverseGaussian,
 }
 
 /// Result wrapper returned by [`Glm`].
@@ -23,6 +25,7 @@ pub enum GlmResult {
     Binomial(LogisticResult),
     Poisson(PoissonResult),
     Gamma(GammaResult),
+    InverseGaussian(GammaResult),
 }
 
 /// Small generic GLM front-end that dispatches to the crate's concrete model engines.
@@ -63,6 +66,21 @@ impl Glm {
                 .with_feature_names(self.feature_names.clone())
                 .fit(x, y)
                 .map(GlmResult::Gamma),
+            GlmFamily::InverseGaussian => Gamma::new()
+                .with_feature_names(self.feature_names.clone())
+                .fit(x, y)
+                .map(GlmResult::InverseGaussian),
+        }
+    }
+}
+
+impl GlmResult {
+    pub fn coefficients(&self) -> &[f64] {
+        match self {
+            GlmResult::Gaussian(r) => &r.coefficients,
+            GlmResult::Binomial(r) => &r.coefficients,
+            GlmResult::Poisson(r) => &r.coefficients,
+            GlmResult::Gamma(r) | GlmResult::InverseGaussian(r) => &r.coefficients,
         }
     }
 }
@@ -76,6 +94,7 @@ impl TryFrom<&str> for GlmFamily {
             "binomial" | "logit" | "logistic" => Ok(Self::Binomial),
             "poisson" => Ok(Self::Poisson),
             "gamma" => Ok(Self::Gamma),
+            "inversegaussian" | "inverse_gaussian" | "invgauss" => Ok(Self::InverseGaussian),
             other => Err(InferustError::InvalidInput(format!(
                 "unsupported GLM family `{other}`"
             ))),

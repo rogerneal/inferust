@@ -2,23 +2,64 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.1.21] - 2026-07-06
+
+### Added
+
+- **Full benchmark suite** — `examples/bench_all.rs`, statsmodels counterpart, Docker images;
+  see `bench/README.md`.
+- **CI smoke benchmark** — `examples/bench_smoke.rs` (OLS, Logistic, Poisson).
+- **Shared IRLS kernel** (`src/irls.rs`) — incremental `X'WX` accumulation reused across GLM/discrete fits.
+- **PACF methods** — `PacfMethod::{Ols, DurbinLevinson, YuleWalker}` and `pacf_ywm()`.
+
+### Changed
+
+- **Cox PH** — backward risk-set cumulative pass (O(n·p²) per Newton step vs O(n²·p²)).
+- **Probit / NB2 / Gamma / ZIP EM** — avoid per-iteration design-matrix clones; ZIP EM defaults 50 outer / 5 inner IRLS steps.
+- **Robust LM** — quickselect MAD; sandwich meat without n×n diagonal matrices.
+- **Ordered logit** — line search uses LL-only evaluations.
+
+## [0.1.20] - 2026-07-06
+
+### Added
+
+- **GEE parity** — `gee_poisson` statsmodels fixture and `tests/parity_gee.rs`.
+- **Generic GLM parity** — `tests/parity_glm_family.rs`; `GlmFamily::InverseGaussian`
+  dispatch and `GlmResult::coefficients()`.
+- **VAR impulse responses** — `VarResult::impulse_response` with Cholesky identification.
+- **OLS column-major API** — `Ols::fit_column_major` for BLAS-friendly layouts.
+- **Post-estimation trait** — `post_estimation::ModelResult` and
+  `wald_linear_contrast` across OLS/GLM results.
+- **Polars bridge** — optional `polars` feature with `polars_bridge::from_polars`.
+- **Panel FE** — `panel::PanelOls::fit_entity_fe` and `two_way_cluster_ids` helper.
+
+## [0.1.19] - 2026-07-06
+
+### Added
+
+- **MixedLM random slopes** — `MixedLinearModel::fit_random_intercept_slope`
+  estimates group-specific random intercepts and a random slope on one covariate,
+  reporting `random_slopes` and `variance_components.var_slope`.
+
+## [0.1.18] - 2026-07-06
+
+### Added
+
+- **Discrete-choice parity harness** — statsmodels reference fixtures and
+  `tests/parity_discrete.rs` for Probit, Negative Binomial, Multinomial Logit,
+  Ordered Logit, and Zero-Inflated Poisson.
+- **Formula API for discrete models** — `DataFrame::probit`,
+  `negative_binomial`, `multinomial`, `ordered_logit`, and `zip`.
+
 ## [0.1.17] - 2026-07-06
 
 ### Added
 
-- **Performance** — shared `irls` kernel; Cox PH backward risk-set pass (O(n·p²) per NR step);
-  incremental `X'WX` for Probit, NB2, Gamma, ZIP EM; quickselect MAD; PACF
-  `DurbinLevinson` / `pacf_ywm` methods via `PacfMethod`.
-- **Parity fixtures** — discrete (Probit, NB2, MNLogit, OrderedLogit, ZIP), GEE,
-  mixed LM, and robust LM against statsmodels (`tests/parity_{discrete,gee,mixed,robust}.rs`).
-- **CI smoke benchmark** — `examples/bench_smoke.rs` (OLS, Logistic, Poisson).
-
-### Changed
-
-- ZIP default EM iterations reduced from 200 → 50; inner IRLS capped at 5 steps.
-- Ordered logit line search uses LL-only evals (no full BHHH per backtrack step).
-
-## [Unreleased]
+- **State-space Kalman filter** (`statespace::LinearGaussianModel`) — multivariate
+  linear-Gaussian filtering with exact Gaussian log-likelihood for ARMA models.
+- **Exact ARIMA MLE** — `Arima::exact_mle()` / `ArimaMethod::ExactMle` fits
+  MA components via state-space MLE instead of conditional sum of squares.
+  `Sarima::exact_mle()` uses the same engine when seasonal orders are zero.
 
 ## [0.1.16] - 2026-06-22
 

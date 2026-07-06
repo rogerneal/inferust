@@ -1,6 +1,6 @@
 [package]
 name = "inferust"
-version = "0.1.17"
+version = "0.1.21"
 edition = "2021"
 description = "Statistical modeling for Rust — OLS/WLS regression, GLM, survival analysis, ARIMA/VAR, nonparametric tests, and more. A statsmodels-style library."
 license = "MIT"
@@ -19,10 +19,15 @@ path = "examples/basic_ols.rs"
 name = "bench_ols"
 path = "examples/bench_ols.rs"
 
+[features]
+default = []
+polars = ["dep:polars"]
+
 [dependencies]
 nalgebra = "0.33"
 statrs = "0.17"
 thiserror = "1"
+polars = { version = "0.46", optional = true, default-features = false, features = ["dtype-full"] }
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -59,6 +64,10 @@ path = "tests/parity_mixed.rs"
 [[test]]
 name = "parity_robust"
 path = "tests/parity_robust.rs"
+
+[[test]]
+name = "parity_glm_family"
+path = "tests/parity_glm_family.rs"
 
 [[test]]
 name = "parity_ols"
