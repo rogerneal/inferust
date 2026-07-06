@@ -5,13 +5,15 @@ use statrs::distribution::{ContinuousCDF, StudentsT};
 
 use crate::error::{InferustError, Result};
 
-/// Variance components for a random-intercept mixed model.
+/// Variance components for a mixed linear model.
 #[derive(Debug, Clone)]
 pub struct VarianceComponents {
     /// Between-group variance (σ²_b) — random intercept variance.
     pub var_random: f64,
     /// Within-group (residual) variance (σ²_e).
     pub var_residual: f64,
+    /// Random slope variance (σ²_u) when a random slope is estimated.
+    pub var_slope: Option<f64>,
     /// Intra-class correlation: σ²_b / (σ²_b + σ²_e).
     pub icc: f64,
 }
@@ -30,6 +32,8 @@ pub struct MixedLinearResult {
     pub feature_names: Vec<String>,
     /// Estimated random intercepts (EBLUP) per group.
     pub random_intercepts: BTreeMap<usize, f64>,
+    /// Estimated random slopes (EBLUP) per group when a slope is modelled.
+    pub random_slopes: BTreeMap<usize, f64>,
     /// Fitted values (fixed + random).
     pub fitted_values: Vec<f64>,
     /// Residuals (y - fitted).
@@ -315,11 +319,273 @@ impl MixedLinearModel {
             p_values,
             feature_names,
             random_intercepts,
+            random_slopes: BTreeMap::new(),
             fitted_values,
             residuals,
             variance_components: VarianceComponents {
                 var_random: sigma2_b,
                 var_residual: sigma2_e,
+                var_slope: None,
+                icc,
+            },
+            group_count: q,
+            iterations,
+            reml_loglik,
+        })
+    }
+
+    /// Fit a random-intercept + random-slope model on one covariate column.
+    ///
+    /// Model: `yᵢⱼ = xᵢⱼ'β + bᵢ + uᵢ · xᵢⱼₛ + εᵢⱼ` with independent
+    /// `bᵢ ~ N(0, σ²_b)`, `uᵢ ~ N(0, σ²_u)`, `εᵢⱼ ~ N(0, σ²_e)`.
+    pub fn fit_random_intercept_slope(
+        &self,
+        x: &[Vec<f64>],
+        y: &[f64],
+        groups: &[usize],
+        slope_col: usize,
+    ) -> Result<MixedLinearResult> {
+        let n = y.len();
+        if n == 0 {
+            return Err(InferustError::InsufficientData { needed: 1, got: 0 });
+        }
+        if !x.is_empty() && slope_col >= x[0].len() {
+            return Err(InferustError::InvalidInput(format!(
+                "slope_col {slope_col} out of range for {} predictors",
+                x[0].len()
+            )));
+        }
+
+        let k = if x.is_empty() { 1 } else { x[0].len() + 1 };
+        let mut x_mat = DMatrix::zeros(n, k);
+        for (i, row) in x.iter().enumerate() {
+            x_mat[(i, 0)] = 1.0;
+            for (j, &v) in row.iter().enumerate() {
+                x_mat[(i, j + 1)] = v;
+            }
+        }
+        let z_slope: Vec<f64> = if x.is_empty() {
+            vec![0.0; n]
+        } else {
+            x.iter().map(|row| row[slope_col]).collect()
+        };
+        let y_vec = DVector::from_vec(y.to_vec());
+
+        let mut group_ids: Vec<usize> = groups.to_vec();
+        group_ids.sort_unstable();
+        group_ids.dedup();
+        let q = group_ids.len();
+        let group_indices: Vec<Vec<usize>> = group_ids
+            .iter()
+            .map(|&gid| {
+                groups
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, &g)| if g == gid { Some(i) } else { None })
+                    .collect()
+            })
+            .collect();
+
+        let xt = x_mat.transpose();
+        let beta_ols = (&xt * &x_mat)
+            .lu()
+            .solve(&(&xt * &y_vec))
+            .ok_or(InferustError::SingularMatrix)?;
+        let resid_ols = &y_vec - &x_mat * &beta_ols;
+        let var_total = resid_ols.iter().map(|r| r * r).sum::<f64>() / (n as f64 - k as f64);
+        let mut sigma2_e = var_total * 0.4;
+        let mut sigma2_b = var_total * 0.3;
+        let mut sigma2_u = var_total * 0.3;
+        let mut beta = beta_ols;
+        let mut iterations = 0;
+
+        for _iter in 0..self.max_iter {
+            iterations += 1;
+            let mut b_hat = vec![0.0_f64; q];
+            let mut u_hat = vec![0.0_f64; q];
+            let mut var_b_post = vec![0.0_f64; q];
+            let mut var_u_post = vec![0.0_f64; q];
+
+            for (gi, idx) in group_indices.iter().enumerate() {
+                let n_i = idx.len() as f64;
+                let mean_z: f64 = idx.iter().map(|&j| z_slope[j]).sum::<f64>() / n_i;
+                let var_z: f64 = idx
+                    .iter()
+                    .map(|&j| (z_slope[j] - mean_z).powi(2))
+                    .sum::<f64>()
+                    / n_i.max(1.0);
+                let lambda_b = sigma2_b / (sigma2_b + sigma2_e / n_i);
+                let lambda_u = sigma2_u / (sigma2_u + sigma2_e / var_z.max(1e-6));
+                let resid_i: f64 = idx
+                    .iter()
+                    .map(|&j| y[j] - (x_mat.row(j) * &beta)[(0, 0)])
+                    .sum::<f64>()
+                    / n_i;
+                let resid_slope: f64 = idx
+                    .iter()
+                    .map(|&j| {
+                        (y[j] - (x_mat.row(j) * &beta)[(0, 0)] - lambda_b * resid_i) * z_slope[j]
+                    })
+                    .sum::<f64>()
+                    / (idx.iter().map(|&j| z_slope[j].powi(2)).sum::<f64>() + 1e-6);
+                b_hat[gi] = lambda_b * resid_i;
+                u_hat[gi] = lambda_u * resid_slope;
+                var_b_post[gi] = sigma2_b * (1.0 - lambda_b);
+                var_u_post[gi] = sigma2_u * (1.0 - lambda_u);
+            }
+
+            let mut xvx = DMatrix::zeros(k, k);
+            let mut xvy = DVector::zeros(k);
+            for idx in &group_indices {
+                let n_i = idx.len() as f64;
+                let c = sigma2_b / (sigma2_e + n_i * sigma2_b);
+                let x_i: DMatrix<f64> = DMatrix::from_rows(
+                    &idx.iter()
+                        .map(|&j| x_mat.row(j).clone_owned())
+                        .collect::<Vec<_>>(),
+                );
+                let y_i: DVector<f64> = DVector::from_vec(idx.iter().map(|&j| y[j]).collect());
+                let xt_i = x_i.transpose();
+                let ones = DVector::from_element(idx.len(), 1.0_f64);
+                let xt_ones = &xt_i * &ones;
+                xvx += (&xt_i * &x_i - c * &xt_ones * xt_ones.transpose()) / sigma2_e;
+                let xt_y = &xt_i * &y_i;
+                let ones_y: f64 = y_i.sum();
+                xvy += (xt_y - c * &xt_ones * ones_y) / sigma2_e;
+            }
+            beta = xvx
+                .clone()
+                .lu()
+                .solve(&xvy)
+                .ok_or(InferustError::SingularMatrix)?;
+
+            let mut sse = 0.0_f64;
+            let mut trace_h_e = 0.0_f64;
+            let mut ssb = 0.0_f64;
+            let mut ssu = 0.0_f64;
+            for (gi, idx) in group_indices.iter().enumerate() {
+                for &j in idx {
+                    let fitted_j =
+                        (x_mat.row(j) * &beta)[(0, 0)] + b_hat[gi] + u_hat[gi] * z_slope[j];
+                    sse += (y[j] - fitted_j).powi(2);
+                }
+                trace_h_e += (var_b_post[gi] + var_u_post[gi]) * idx.len() as f64;
+                ssb += b_hat[gi].powi(2) + var_b_post[gi];
+                ssu += u_hat[gi].powi(2) + var_u_post[gi];
+            }
+            let new_sigma2_e = (sse + trace_h_e) / (n as f64);
+            let new_sigma2_b = ssb / (q as f64);
+            let new_sigma2_u = ssu / (q as f64);
+            let delta = (new_sigma2_e - sigma2_e).abs()
+                + (new_sigma2_b - sigma2_b).abs()
+                + (new_sigma2_u - sigma2_u).abs();
+            sigma2_e = new_sigma2_e.max(1e-10);
+            sigma2_b = new_sigma2_b.max(0.0);
+            sigma2_u = new_sigma2_u.max(0.0);
+            if delta < self.tolerance {
+                break;
+            }
+        }
+
+        let mut random_intercepts = BTreeMap::new();
+        let mut random_slopes = BTreeMap::new();
+        for (gi, &gid) in group_ids.iter().enumerate() {
+            let idx = &group_indices[gi];
+            let n_i = idx.len() as f64;
+            let lambda_b = sigma2_b / (sigma2_b + sigma2_e / n_i);
+            let mean_z: f64 = idx.iter().map(|&j| z_slope[j]).sum::<f64>() / n_i;
+            let var_z: f64 = idx
+                .iter()
+                .map(|&j| (z_slope[j] - mean_z).powi(2))
+                .sum::<f64>()
+                / n_i.max(1.0);
+            let lambda_u = sigma2_u / (sigma2_u + sigma2_e / var_z.max(1e-6));
+            let resid_i: f64 = idx
+                .iter()
+                .map(|&j| y[j] - (x_mat.row(j) * &beta)[(0, 0)])
+                .sum::<f64>()
+                / n_i;
+            let resid_slope: f64 = idx
+                .iter()
+                .map(|&j| (y[j] - (x_mat.row(j) * &beta)[(0, 0)] - lambda_b * resid_i) * z_slope[j])
+                .sum::<f64>()
+                / (idx.iter().map(|&j| z_slope[j].powi(2)).sum::<f64>() + 1e-6);
+            random_intercepts.insert(gid, lambda_b * resid_i);
+            random_slopes.insert(gid, lambda_u * resid_slope);
+        }
+
+        let fitted_values: Vec<f64> = (0..n)
+            .map(|i| {
+                let gi = group_ids.iter().position(|&gid| gid == groups[i]).unwrap();
+                (x_mat.row(i) * &beta)[(0, 0)]
+                    + random_intercepts[&group_ids[gi]]
+                    + random_slopes[&group_ids[gi]] * z_slope[i]
+            })
+            .collect();
+        let residuals: Vec<f64> = y
+            .iter()
+            .zip(fitted_values.iter())
+            .map(|(yi, fi)| yi - fi)
+            .collect();
+
+        let mut xvx = DMatrix::zeros(k, k);
+        for idx in &group_indices {
+            let n_i = idx.len() as f64;
+            let c = sigma2_b / (sigma2_e + n_i * sigma2_b);
+            let x_i: DMatrix<f64> = DMatrix::from_rows(
+                &idx.iter()
+                    .map(|&j| x_mat.row(j).clone_owned())
+                    .collect::<Vec<_>>(),
+            );
+            let xt_i = x_i.transpose();
+            let ones = DVector::from_element(idx.len(), 1.0_f64);
+            let xt_ones = &xt_i * &ones;
+            xvx += (&xt_i * &x_i - c * &xt_ones * xt_ones.transpose()) / sigma2_e;
+        }
+        let cov_beta = xvx.try_inverse().ok_or(InferustError::SingularMatrix)?;
+        let std_errors: Vec<f64> = (0..k).map(|j| cov_beta[(j, j)].max(0.0).sqrt()).collect();
+        let df = (n as f64) - (k as f64) - 2.0 * (q as f64);
+        let t_dist = StudentsT::new(0.0, 1.0, df.max(1.0)).ok();
+        let coefficients: Vec<f64> = beta.iter().cloned().collect();
+        let t_statistics: Vec<f64> = coefficients
+            .iter()
+            .zip(std_errors.iter())
+            .map(|(&c, &se)| if se > 0.0 { c / se } else { f64::NAN })
+            .collect();
+        let p_values: Vec<f64> = t_statistics
+            .iter()
+            .map(|&t| match &t_dist {
+                Some(d) => 2.0 * d.cdf(-t.abs()),
+                None => f64::NAN,
+            })
+            .collect();
+        let icc = if sigma2_b + sigma2_e > 0.0 {
+            sigma2_b / (sigma2_b + sigma2_e)
+        } else {
+            0.0
+        };
+        let reml_loglik = -0.5
+            * (residuals.iter().map(|r| r * r).sum::<f64>() / sigma2_e
+                + (n as f64) * sigma2_e.ln()
+                + (q as f64) * (sigma2_b + sigma2_u).ln());
+
+        let mut feature_names = vec!["const".to_string()];
+        feature_names.extend(self.feature_names.iter().cloned());
+
+        Ok(MixedLinearResult {
+            coefficients,
+            std_errors,
+            t_statistics,
+            p_values,
+            feature_names,
+            random_intercepts,
+            random_slopes,
+            fitted_values,
+            residuals,
+            variance_components: VarianceComponents {
+                var_random: sigma2_b,
+                var_residual: sigma2_e,
+                var_slope: Some(sigma2_u),
                 icc,
             },
             group_count: q,
@@ -395,5 +661,26 @@ mod tests {
             .p_values
             .iter()
             .all(|p| p.is_finite() && *p >= 0.0 && *p <= 1.0));
+    }
+
+    #[test]
+    fn random_slope_estimates_group_specific_slopes() {
+        let x = vec![
+            vec![1.0],
+            vec![2.0],
+            vec![3.0],
+            vec![1.0],
+            vec![2.0],
+            vec![3.0],
+        ];
+        let y = vec![2.0, 5.0, 8.0, 5.0, 8.0, 11.0];
+        let groups = vec![1, 1, 1, 2, 2, 2];
+        let fit = MixedLinearModel::new()
+            .fit_random_intercept_slope(&x, &y, &groups, 0)
+            .unwrap();
+        assert_eq!(fit.group_count, 2);
+        assert!(fit.variance_components.var_slope.is_some());
+        assert!(fit.random_slopes.contains_key(&1));
+        assert!(fit.random_slopes.contains_key(&2));
     }
 }
