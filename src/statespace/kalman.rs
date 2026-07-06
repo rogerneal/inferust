@@ -121,14 +121,12 @@ impl LinearGaussianModel {
                 &t_mat * &cov * t_mat.transpose() + &r * self.state_variance * r.transpose();
 
             let forecast = (z.clone() * &pred_state)[(0, 0)] + self.obs_intercept;
-            let forecast_var =
-                (z.clone() * &pred_cov * z.transpose())[(0, 0)] + self.obs_variance;
+            let forecast_var = (z.clone() * &pred_cov * z.transpose())[(0, 0)] + self.obs_variance;
             let forecast_var = forecast_var.max(1e-12);
             let error = obs - forecast;
 
             log_likelihood += -0.5
-                * ((2.0 * std::f64::consts::PI * forecast_var).ln()
-                    + error * error / forecast_var);
+                * ((2.0 * std::f64::consts::PI * forecast_var).ln() + error * error / forecast_var);
 
             let gain = &pred_cov * z.transpose() / forecast_var;
             state = pred_state + &gain * error;

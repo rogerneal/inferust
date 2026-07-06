@@ -7,6 +7,4 @@ mod kalman;
 mod scalar;
 
 pub use kalman::{KalmanLikelihood, LinearGaussianModel};
-pub use scalar::{
-    KalmanFilterResult, LocalLevel, LocalLevelResult, ScalarStateSpace,
-};
+pub use scalar::{KalmanFilterResult, LocalLevel, LocalLevelResult, ScalarStateSpace};

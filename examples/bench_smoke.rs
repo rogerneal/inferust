@@ -20,7 +20,11 @@ fn main() {
         .iter()
         .map(|r| {
             let p = 1.0 / (1.0 + (-r[0]).exp());
-            if lcg(&mut s) < p { 1.0 } else { 0.0 }
+            if lcg(&mut s) < p {
+                1.0
+            } else {
+                0.0
+            }
         })
         .collect();
     let y_cnt: Vec<f64> = x
@@ -31,9 +35,15 @@ fn main() {
         })
         .collect();
 
-    bench("ols", || { Ols::new().fit(&x, &y_lin).unwrap(); });
-    bench("logistic", || { Logistic::new().fit(&x, &y_bin).unwrap(); });
-    bench("poisson", || { Poisson::new().fit(&x, &y_cnt).unwrap(); });
+    bench("ols", || {
+        Ols::new().fit(&x, &y_lin).unwrap();
+    });
+    bench("logistic", || {
+        Logistic::new().fit(&x, &y_bin).unwrap();
+    });
+    bench("poisson", || {
+        Poisson::new().fit(&x, &y_cnt).unwrap();
+    });
 }
 
 fn bench<F: Fn()>(label: &str, f: F) {
@@ -49,7 +59,9 @@ fn bench<F: Fn()>(label: &str, f: F) {
 }
 
 fn lcg(s: &mut u64) -> f64 {
-    *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *s = s
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     ((*s >> 11) as f64) / (1u64 << 53) as f64
 }
 

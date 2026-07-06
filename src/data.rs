@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
-use crate::error::{InferustError, Result};
 use crate::discrete::{
     MultinomialLogit, MultinomialLogitResult, NegativeBinomial, NegativeBinomialResult,
     OrderedLogit, OrderedLogitResult, Probit, ProbitResult, ZeroInflatedPoisson,
     ZeroInflatedPoissonResult,
 };
+use crate::error::{InferustError, Result};
 use crate::glm::{Logistic, LogisticResult, Poisson, PoissonResult};
 use crate::regression::{Ols, OlsResult, QuantileRegression, QuantileRegressionResult, Wls};
 
@@ -611,11 +611,7 @@ impl DataFrame {
     /// The response column must contain integer class labels (0, 1, 2, …).
     pub fn multinomial(&self, formula: &str) -> Result<MultinomialLogitResult> {
         let d = self.design_matrices(formula)?;
-        let y = d
-            .y
-            .into_iter()
-            .map(|v| v as usize)
-            .collect::<Vec<_>>();
+        let y = d.y.into_iter().map(|v| v as usize).collect::<Vec<_>>();
         MultinomialLogit::new()
             .with_feature_names(d.predictor_names)
             .max_iter(400)
@@ -625,11 +621,7 @@ impl DataFrame {
     /// Fit proportional-odds ordered logit regression from a formula.
     pub fn ordered_logit(&self, formula: &str) -> Result<OrderedLogitResult> {
         let d = self.design_matrices(formula)?;
-        let y = d
-            .y
-            .into_iter()
-            .map(|v| v as usize)
-            .collect::<Vec<_>>();
+        let y = d.y.into_iter().map(|v| v as usize).collect::<Vec<_>>();
         OrderedLogit::new()
             .with_feature_names(d.predictor_names)
             .max_iter(400)

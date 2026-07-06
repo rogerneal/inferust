@@ -816,8 +816,7 @@ impl OrderedLogit {
                 let cuts_try = decode_cutpoints(&theta_try, km1);
                 let beta_try: Vec<f64> = (0..p).map(|j| theta_try[km1 + j]).collect();
                 let xb_try = &x_mat * DVector::from_row_slice(&beta_try);
-                let ll_try =
-                    ordinal_log_likelihood(&xb_try, &y_idx, &cuts_try, n, km1);
+                let ll_try = ordinal_log_likelihood(&xb_try, &y_idx, &cuts_try, n, km1);
                 if ll_try >= ll + 0.1 * step * grad_sq {
                     break;
                 }
@@ -948,7 +947,13 @@ fn cutpoint_jacobian(theta: &DVector<f64>, km1: usize) -> DMatrix<f64> {
 }
 
 /// Log-likelihood only (for line search).
-fn ordinal_log_likelihood(xb: &DVector<f64>, y_idx: &[usize], cuts: &[f64], n: usize, km1: usize) -> f64 {
+fn ordinal_log_likelihood(
+    xb: &DVector<f64>,
+    y_idx: &[usize],
+    cuts: &[f64],
+    n: usize,
+    km1: usize,
+) -> f64 {
     let mut ll = 0.0;
     for i in 0..n {
         let k = y_idx[i];

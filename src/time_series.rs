@@ -402,8 +402,13 @@ fn fit_arma_mle(
         vec![]
     };
     let sigma2 = params[k].exp();
-    let (fitted, resids) =
-        arma_kalman_residuals(intercept, &ar_coefficients, &ma_coefficients, sigma2, series);
+    let (fitted, resids) = arma_kalman_residuals(
+        intercept,
+        &ar_coefficients,
+        &ma_coefficients,
+        sigma2,
+        series,
+    );
     let n = fitted.len();
     let ll = LinearGaussianModel::arma(intercept, &ar_coefficients, &ma_coefficients, sigma2)?
         .filter(series)?
@@ -934,10 +939,10 @@ impl VarResult {
                 shock[i] = chol[i][j];
             }
             let mut state = shock;
-            for h in 0..periods {
+            for response_h in responses.iter_mut().take(periods) {
                 let out = &companion * &state;
                 for i in 0..self.k {
-                    responses[h][j][i] = out[i];
+                    response_h[j][i] = out[i];
                 }
                 state = out;
             }
@@ -967,8 +972,8 @@ fn cholesky_lower(matrix: &[Vec<f64>]) -> Result<Vec<Vec<f64>>> {
     for i in 0..n {
         for j in 0..=i {
             let mut sum = matrix[i][j];
-            for k in 0..j {
-                sum -= l[i][k] * l[j][k];
+            for (lik, ljk) in l[i].iter().zip(l[j].iter()).take(j) {
+                sum -= lik * ljk;
             }
             if i == j {
                 if sum <= 0.0 {
@@ -1066,14 +1071,12 @@ pub fn pacf(series: &[f64], max_lag: usize) -> Result<Vec<f64>> {
 }
 
 /// PACF with an explicit estimation method.
-pub fn pacf_with_method(
-    series: &[f64],
-    max_lag: usize,
-    method: PacfMethod,
-) -> Result<Vec<f64>> {
+pub fn pacf_with_method(series: &[f64], max_lag: usize, method: PacfMethod) -> Result<Vec<f64>> {
     match method {
         PacfMethod::Ols => pacf_ols(series, max_lag),
-        PacfMethod::DurbinLevinson | PacfMethod::YuleWalker => pacf_durbin_levinson(series, max_lag),
+        PacfMethod::DurbinLevinson | PacfMethod::YuleWalker => {
+            pacf_durbin_levinson(series, max_lag)
+        }
     }
 }
 
