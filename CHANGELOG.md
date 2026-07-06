@@ -2,6 +2,14 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.1.19] - 2026-07-06
+
+### Added
+
+- **MixedLM random slopes** — `MixedLinearModel::fit_random_intercept_slope`
+  estimates group-specific random intercepts and a random slope on one covariate,
+  reporting `random_slopes` and `variance_components.var_slope`.
+
 ## [0.1.18] - 2026-07-06
 
 ### Added
