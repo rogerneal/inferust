@@ -14,6 +14,7 @@
 
 use crate::error::{InferustError, Result};
 use crate::regression::Ols;
+use crate::statespace::LinearGaussianModel;
 use nalgebra::{DMatrix, DVector};
 use statrs::distribution::{ChiSquared, ContinuousCDF, FisherSnedecor, Normal};
 
@@ -110,7 +111,17 @@ impl AutoRegressiveResult {
 
 // ── ARIMA ─────────────────────────────────────────────────────────────────────
 
-/// ARIMA(p, d, q) model fitted by conditional sum of squares (CSS).
+/// Estimation method for [`Arima`] and [`Sarima`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArimaMethod {
+    /// Conditional sum of squares (fast; default for MA models).
+    #[default]
+    Css,
+    /// Exact Gaussian MLE via a state-space Kalman filter.
+    ExactMle,
+}
+
+/// ARIMA(p, d, q) model fitted by conditional sum of squares (CSS) or exact MLE.
 ///
 /// All combinations of p, d, q ≥ 0 are supported. When q = 0 the AR
 /// coefficients are estimated by fast OLS; when q > 0 the CSS objective is
@@ -133,6 +144,7 @@ pub struct Arima {
     pub d: usize,
     /// MA order.
     pub q: usize,
+    method: ArimaMethod,
     max_iter: usize,
     tolerance: f64,
 }
@@ -184,9 +196,22 @@ impl Arima {
             p,
             d,
             q,
+            method: ArimaMethod::Css,
             max_iter: 2000,
             tolerance: 1e-7,
         }
+    }
+
+    /// Use exact Gaussian MLE (state-space Kalman filter) instead of CSS.
+    pub fn with_method(mut self, method: ArimaMethod) -> Self {
+        self.method = method;
+        self
+    }
+
+    /// Use exact MLE via state-space Kalman filtering.
+    pub fn exact_mle(mut self) -> Self {
+        self.method = ArimaMethod::ExactMle;
+        self
     }
 
     /// Override the maximum number of CSS optimiser iterations (default 2000).
@@ -265,7 +290,19 @@ impl Arima {
             });
         }
 
-        // --- full CSS path: q > 0 ---
+        // --- MA path: CSS or exact state-space MLE ---
+        if self.method == ArimaMethod::ExactMle {
+            return fit_arma_mle(
+                &series,
+                self.p,
+                self.q,
+                self.max_iter,
+                self.tolerance,
+                original_tails,
+                self.d,
+            );
+        }
+
         let mut init = vec![0.0_f64; k];
         // Intercept initialised to series mean
         init[0] = series.iter().sum::<f64>() / series.len() as f64;
@@ -321,6 +358,167 @@ impl Arima {
             last_residuals,
         })
     }
+}
+
+fn fit_arma_mle(
+    series: &[f64],
+    p: usize,
+    q: usize,
+    max_iter: usize,
+    tolerance: f64,
+    original_tails: Vec<Vec<f64>>,
+    d: usize,
+) -> Result<ArimaResult> {
+    let k = 1 + p + q;
+    let mut init = vec![0.0_f64; k + 1];
+    init[0] = series.iter().sum::<f64>() / series.len() as f64;
+    if p > 0 {
+        if let Ok(ar) = AutoRegressive::new(p).fit(series) {
+            init[0] = ar.intercept;
+            for (i, &c) in ar.coefficients.iter().enumerate() {
+                init[1 + i] = c;
+            }
+        }
+    }
+    for i in 0..q {
+        init[1 + p + i] = 0.01;
+    }
+    let resid_var = series
+        .iter()
+        .map(|v| {
+            let diff = v - init[0];
+            diff * diff
+        })
+        .sum::<f64>()
+        / series.len().max(1) as f64;
+    init[k] = resid_var.max(1e-6).ln();
+
+    let params = arma_mle_optimize(series, p, q, &init, max_iter, tolerance);
+    let intercept = params[0];
+    let ar_coefficients = params[1..=p].to_vec();
+    let ma_coefficients = if q > 0 {
+        params[p + 1..=p + q].to_vec()
+    } else {
+        vec![]
+    };
+    let sigma2 = params[k].exp();
+    let (fitted, resids) =
+        arma_kalman_residuals(intercept, &ar_coefficients, &ma_coefficients, sigma2, series);
+    let n = fitted.len();
+    let ll = LinearGaussianModel::arma(intercept, &ar_coefficients, &ma_coefficients, sigma2)?
+        .filter(series)?
+        .log_likelihood;
+
+    Ok(ArimaResult {
+        intercept,
+        ar_coefficients,
+        ma_coefficients,
+        fitted_values: fitted,
+        residuals: resids.clone(),
+        sigma2,
+        log_likelihood: ll,
+        aic: -2.0 * ll + 2.0 * (k + 1) as f64,
+        bic: -2.0 * ll + (k + 1) as f64 * (n as f64).ln(),
+        n,
+        p,
+        d,
+        q,
+        original_tails,
+        last_residuals: resids,
+    })
+}
+
+fn arma_mle_objective(params: &[f64], y: &[f64], p: usize, q: usize) -> f64 {
+    let k = 1 + p + q;
+    if params.len() != k + 1 {
+        return f64::INFINITY;
+    }
+    let intercept = params[0];
+    let ar = &params[1..=p];
+    let ma = if q > 0 { &params[p + 1..=p + q] } else { &[] };
+    let sigma2 = params[k].exp();
+    if sigma2 <= 1e-12 || !sigma2.is_finite() {
+        return f64::INFINITY;
+    }
+    for &phi in ar {
+        if phi.abs() > 0.999 {
+            return f64::INFINITY;
+        }
+    }
+    for &theta in ma {
+        if theta.abs() > 0.999 {
+            return f64::INFINITY;
+        }
+    }
+    match LinearGaussianModel::arma(intercept, ar, ma, sigma2) {
+        Ok(model) => match model.filter(y) {
+            Ok(out) => -out.log_likelihood,
+            Err(_) => f64::INFINITY,
+        },
+        Err(_) => f64::INFINITY,
+    }
+}
+
+fn arma_mle_gradient(params: &[f64], y: &[f64], p: usize, q: usize) -> Vec<f64> {
+    let h = 1e-6;
+    let f0 = arma_mle_objective(params, y, p, q);
+    let mut grad = vec![0.0; params.len()];
+    let mut ph = params.to_vec();
+    for i in 0..params.len() {
+        ph[i] += h;
+        grad[i] = (arma_mle_objective(&ph, y, p, q) - f0) / h;
+        ph[i] = params[i];
+    }
+    grad
+}
+
+fn arma_mle_optimize(
+    y: &[f64],
+    p: usize,
+    q: usize,
+    init: &[f64],
+    max_iter: usize,
+    tol: f64,
+) -> Vec<f64> {
+    let mut params = init.to_vec();
+    let np = params.len();
+    let (alpha, beta1, beta2, eps) = (0.02_f64, 0.9_f64, 0.999_f64, 1e-8_f64);
+    let mut m = vec![0.0_f64; np];
+    let mut v = vec![0.0_f64; np];
+    for iter in 1..=max_iter {
+        let grad = arma_mle_gradient(&params, y, p, q);
+        let gnorm: f64 = grad.iter().map(|g| g * g).sum::<f64>().sqrt();
+        if gnorm < tol {
+            break;
+        }
+        let t = iter as f64;
+        for i in 0..np {
+            m[i] = beta1 * m[i] + (1.0 - beta1) * grad[i];
+            v[i] = beta2 * v[i] + (1.0 - beta2) * grad[i] * grad[i];
+            let m_hat = m[i] / (1.0 - beta1.powf(t));
+            let v_hat = v[i] / (1.0 - beta2.powf(t));
+            params[i] -= alpha * m_hat / (v_hat.sqrt() + eps);
+        }
+    }
+    params
+}
+
+fn arma_kalman_residuals(
+    intercept: f64,
+    ar: &[f64],
+    ma: &[f64],
+    sigma2: f64,
+    y: &[f64],
+) -> (Vec<f64>, Vec<f64>) {
+    let model = LinearGaussianModel::arma(intercept, ar, ma, sigma2).expect("arma model");
+    let filtered = model.filter(y).expect("kalman filter");
+    let fitted: Vec<f64> = filtered
+        .forecast_errors
+        .iter()
+        .zip(y.iter())
+        .map(|(e, &obs)| obs - e)
+        .collect();
+    (fitted, filtered.forecast_errors)
 }
 
 impl ArimaResult {
@@ -1532,6 +1730,7 @@ pub struct Sarima {
     pub qs: usize,
     /// Seasonal period.
     pub s: usize,
+    method: ArimaMethod,
     max_iter: usize,
     tolerance: f64,
 }
@@ -1583,9 +1782,22 @@ impl Sarima {
             ds,
             qs,
             s,
+            method: ArimaMethod::Css,
             max_iter: 3000,
             tolerance: 1e-7,
         }
+    }
+
+    /// Use exact Gaussian MLE when the seasonal orders are all zero.
+    pub fn with_method(mut self, method: ArimaMethod) -> Self {
+        self.method = method;
+        self
+    }
+
+    /// Shorthand for [`Self::with_method`](ArimaMethod::ExactMle).
+    pub fn exact_mle(mut self) -> Self {
+        self.method = ArimaMethod::ExactMle;
+        self
     }
 
     /// Override the maximum optimiser iterations (default 3000).
@@ -1634,6 +1846,44 @@ impl Sarima {
         for _ in 0..self.d {
             original_tails.push(series.clone());
             series = series.windows(2).map(|w| w[1] - w[0]).collect();
+        }
+
+        // Non-seasonal exact MLE via state-space Kalman filter.
+        if self.ps == 0
+            && self.ds == 0
+            && self.qs == 0
+            && self.method == ArimaMethod::ExactMle
+            && self.q > 0
+        {
+            let arma = fit_arma_mle(
+                &series,
+                self.p,
+                self.q,
+                self.max_iter,
+                self.tolerance,
+                original_tails.clone(),
+                self.d,
+            )?;
+            return Ok(SarimaResult {
+                intercept: arma.intercept,
+                ar_coefficients: arma.ar_coefficients,
+                ma_coefficients: arma.ma_coefficients,
+                seasonal_ar: vec![],
+                seasonal_ma: vec![],
+                residuals: arma.residuals,
+                fitted_values: arma.fitted_values,
+                sigma2: arma.sigma2,
+                log_likelihood: arma.log_likelihood,
+                aic: arma.aic,
+                bic: arma.bic,
+                n: arma.n,
+                original_tails,
+                seasonal_tails,
+                last_residuals: arma.last_residuals,
+                s: self.s,
+                d: self.d,
+                ds: self.ds,
+            });
         }
 
         // ── Step 3: expand multiplicative AR and MA polynomials ─────────────
