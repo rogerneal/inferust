@@ -1050,11 +1050,11 @@ pub fn acf(series: &[f64], max_lag: usize) -> Result<Vec<f64>> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PacfMethod {
     /// OLS-AR: fit AR(k) for each lag k and take the last coefficient.
-    #[default]
     Ols,
     /// Durbin-Levinson recursion on the sample ACF (equivalent to OLS-AR for full lags).
     DurbinLevinson,
     /// Yule-Walker with bias correction (statsmodels `method="ywm"`).
+    #[default]
     YuleWalker,
 }
 

@@ -1,6 +1,6 @@
 [package]
 name = "inferust"
-version = "0.1.21"
+version = "0.1.22"
 edition = "2021"
 description = "Statistical modeling for Rust - OLS/WLS regression, GLM, survival analysis, ARIMA/VAR, nonparametric tests, and more. A statsmodels-style library."
 license = "MIT"

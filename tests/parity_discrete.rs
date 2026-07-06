@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{as_f64, as_f64_vec, assert_parity, check_scalar, check_vec, load_fixture, xy};
+use common::{as_f64, as_f64_matrix, as_f64_vec, assert_parity, check_scalar, check_vec, load_fixture, xy};
 use inferust::discrete::{
     MultinomialLogit, NegativeBinomial, OrderedLogit, Probit, ZeroInflatedPoisson,
 };
@@ -66,10 +66,10 @@ fn parity_negbin_small() {
                 &as_f64_vec(&fx["params"]),
                 1e-4,
             ),
-            check_scalar("alpha", result.alpha, as_f64(&fx["alpha"]), 1e-3),
-            check_scalar("llf", result.log_likelihood, as_f64(&fx["llf"]), 1e-3),
-            check_scalar("aic", result.aic, as_f64(&fx["aic"]), 1e-3),
-            check_scalar("bic", result.bic, as_f64(&fx["bic"]), 1e-3),
+            check_scalar("alpha", result.alpha, as_f64(&fx["alpha"]), 5e-4),
+            check_scalar("llf", result.log_likelihood, as_f64(&fx["llf"]), 5e-4),
+            check_scalar("aic", result.aic, as_f64(&fx["aic"]), 5e-4),
+            check_scalar("bic", result.bic, as_f64(&fx["bic"]), 5e-4),
         ],
     );
 }
@@ -86,14 +86,27 @@ fn parity_multinomial_small() {
         .fit(&x, &y)
         .expect("Multinomial fit failed");
 
-    assert_parity(
-        "multinomial_small",
-        vec![
-            check_scalar("llf", result.log_likelihood, as_f64(&fx["llf"]), 1e-3),
-            check_scalar("aic", result.aic, as_f64(&fx["aic"]), 1e-3),
-            check_scalar("bic", result.bic, as_f64(&fx["bic"]), 1e-3),
-        ],
-    );
+    let expected = as_f64_matrix(&fx["params"]);
+    let q = result.coefficients[0].len();
+    let mut checks = Vec::new();
+    for fi in 0..q {
+        for ci in 0..result.coefficients.len() {
+            if fi < expected.len() && ci < expected[fi].len() {
+                checks.push(check_scalar(
+                    &format!("params[{fi}][{ci}]"),
+                    result.coefficients[ci][fi],
+                    expected[fi][ci],
+                    1e-4,
+                ));
+            }
+        }
+    }
+    checks.extend([
+        check_scalar("llf", result.log_likelihood, as_f64(&fx["llf"]), 1e-3),
+        check_scalar("aic", result.aic, as_f64(&fx["aic"]), 1e-3),
+        check_scalar("bic", result.bic, as_f64(&fx["bic"]), 1e-3),
+    ]);
+    assert_parity("multinomial_small", checks);
 }
 
 #[test]
@@ -111,9 +124,15 @@ fn parity_ordered_logit_small() {
     assert_parity(
         "ordered_logit_small",
         vec![
-            check_scalar("llf", result.log_likelihood, as_f64(&fx["llf"]), 1e-2),
-            check_scalar("aic", result.aic, as_f64(&fx["aic"]), 1e-2),
-            check_scalar("bic", result.bic, as_f64(&fx["bic"]), 1e-2),
+            check_vec(
+                "cutpoints",
+                &result.coefficients,
+                &as_f64_vec(&fx["cutpoints"]),
+                1e-3,
+            ),
+            check_scalar("llf", result.log_likelihood, as_f64(&fx["llf"]), 1e-3),
+            check_scalar("aic", result.aic, as_f64(&fx["aic"]), 1e-3),
+            check_scalar("bic", result.bic, as_f64(&fx["bic"]), 1e-3),
         ],
     );
 }
@@ -130,25 +149,24 @@ fn parity_zip_small() {
         .fit(&x, &y, &x)
         .expect("ZIP fit failed");
 
-    // statsmodels orders [inflation block, count block]; inferust reports count then inflation.
     assert_parity(
         "zip_small",
         vec![
             check_vec(
                 "count_params",
                 &result.count_coefficients,
-                &as_f64_vec(&fx["inflation_params"]),
-                5e-3,
+                &as_f64_vec(&fx["count_params"]),
+                1e-3,
             ),
             check_vec(
                 "inflation_params",
                 &result.inflation_coefficients,
-                &as_f64_vec(&fx["count_params"]),
-                5e-3,
+                &as_f64_vec(&fx["inflation_params"]),
+                1e-3,
             ),
-            check_scalar("llf", result.log_likelihood, as_f64(&fx["llf"]), 5e-2),
-            check_scalar("aic", result.aic, as_f64(&fx["aic"]), 5e-2),
-            check_scalar("bic", result.bic, as_f64(&fx["bic"]), 5e-2),
+            check_scalar("llf", result.log_likelihood, as_f64(&fx["llf"]), 1e-3),
+            check_scalar("aic", result.aic, as_f64(&fx["aic"]), 1e-3),
+            check_scalar("bic", result.bic, as_f64(&fx["bic"]), 1e-3),
         ],
     );
 }

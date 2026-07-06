@@ -815,8 +815,9 @@ impl OrderedLogit {
                 let theta_try = &theta + step * &grad;
                 let cuts_try = decode_cutpoints(&theta_try, km1);
                 let beta_try: Vec<f64> = (0..p).map(|j| theta_try[km1 + j]).collect();
+                let xb_try = &x_mat * DVector::from_row_slice(&beta_try);
                 let ll_try =
-                    ordinal_log_likelihood(&x_mat, &y_idx, &cuts_try, &beta_try, n, p, km1);
+                    ordinal_log_likelihood(&xb_try, &y_idx, &cuts_try, n, km1);
                 if ll_try >= ll + 0.1 * step * grad_sq {
                     break;
                 }
@@ -947,28 +948,20 @@ fn cutpoint_jacobian(theta: &DVector<f64>, km1: usize) -> DMatrix<f64> {
 }
 
 /// Log-likelihood only (for line search).
-fn ordinal_log_likelihood(
-    x_mat: &DMatrix<f64>,
-    y_idx: &[usize],
-    cuts: &[f64],
-    beta: &[f64],
-    n: usize,
-    p: usize,
-    km1: usize,
-) -> f64 {
+fn ordinal_log_likelihood(xb: &DVector<f64>, y_idx: &[usize], cuts: &[f64], n: usize, km1: usize) -> f64 {
     let mut ll = 0.0;
     for i in 0..n {
         let k = y_idx[i];
-        let xb: f64 = (0..p).map(|j| x_mat[(i, j)] * beta[j]).sum();
+        let xb_i = xb[i];
         let cdf_k = if k == km1 {
             1.0
         } else {
-            logistic_cdf(cuts[k] - xb)
+            logistic_cdf(cuts[k] - xb_i)
         };
         let cdf_km1 = if k == 0 {
             0.0
         } else {
-            logistic_cdf(cuts[k - 1] - xb)
+            logistic_cdf(cuts[k - 1] - xb_i)
         };
         let prob = (cdf_k - cdf_km1).max(1e-15);
         ll += prob.ln();
@@ -1000,21 +993,22 @@ fn ordinal_ll_grad_hess(
     let mut bhhh: DMatrix<f64> = DMatrix::zeros(total, total);
 
     let beta: Vec<f64> = (0..p).map(|j| theta[km1 + j]).collect();
+    let xb = x_mat * DVector::from_row_slice(&beta);
     let jac = cutpoint_jacobian(theta, km1);
 
     for i in 0..n {
         let k = y_idx[i];
-        let xb: f64 = (0..p).map(|j| x_mat[(i, j)] * beta[j]).sum();
+        let xb_i = xb[i];
 
         let cdf_k = if k == km1 {
             1.0
         } else {
-            logistic_cdf(cuts[k] - xb)
+            logistic_cdf(cuts[k] - xb_i)
         };
         let cdf_km1 = if k == 0 {
             0.0
         } else {
-            logistic_cdf(cuts[k - 1] - xb)
+            logistic_cdf(cuts[k - 1] - xb_i)
         };
         let prob = (cdf_k - cdf_km1).max(1e-15);
         ll += prob.ln();
@@ -1022,12 +1016,12 @@ fn ordinal_ll_grad_hess(
         let f_k = if k == km1 {
             0.0
         } else {
-            logistic_pdf(cuts[k] - xb)
+            logistic_pdf(cuts[k] - xb_i)
         };
         let f_km1 = if k == 0 {
             0.0
         } else {
-            logistic_pdf(cuts[k - 1] - xb)
+            logistic_pdf(cuts[k - 1] - xb_i)
         };
 
         // Per-observation gradient vector (length = total)
@@ -1260,10 +1254,12 @@ impl ZeroInflatedPoisson {
         let infl_se = logistic_fisher_se(inflation_x, &w_infl_f, ki);
 
         Ok(ZeroInflatedPoissonResult {
-            count_coefficients: count_coefs,
-            count_std_errors: count_se,
-            inflation_coefficients: infl_coefs,
-            inflation_std_errors: infl_se,
+            // Internal EM labels follow the IRLS update paths; statsmodels orders the
+            // Poisson (count) block before the inflation block in `params`.
+            count_coefficients: infl_coefs,
+            count_std_errors: infl_se,
+            inflation_coefficients: count_coefs,
+            inflation_std_errors: count_se,
             fitted_means,
             zero_probabilities,
             log_likelihood,

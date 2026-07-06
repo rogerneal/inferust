@@ -39,7 +39,7 @@ regeneration, run `cargo test --tests parity_*` and resolve any new diffs.
 | Iterative GLM / Cox (params, bse) | `1e-5` | Newton / IRLS convergence tolerance is `1e-8` to `1e-10`; final-iterate drift dominates. |
 | GLM z-statistics, p-values | `1e-4` | Compounded from `1e-5` param drift. |
 | ACF / Ljung-Box | `1e-8` to `1e-10` | Closed form. |
-| PACF (Yule-Walker vs OLS-AR) | `5e-3` | Different methods -  inferust uses OLS-AR, statsmodels' `method="ywm"` is biased differently. Tracked as a known gap, see below. |
+| PACF (Yule-Walker vs OLS-AR) | `1e-10` | Default `pacf()` uses YWM/Durbin-Levinson; OLS-AR available via `PacfMethod::Ols`. |
 | ADF t-statistic | `1e-7` | Both fit the same regression; should be tight. |
 | ARIMA params | (no strict parity) | inferust uses CSS, statsmodels uses MLE/statespace. Tested for plausibility only. |
 | Hypothesis tests (t, ANOVA, chi-square, MW) | `1e-9` to `1e-10` | Closed form. p-values rely on `statrs` vs `scipy` distribution implementations; small drift expected. |
@@ -117,11 +117,7 @@ These differences are documented intentionally rather than treated as bugs:
   asymptotically equivalent but diverge on small samples and on highly
   near-non-stationary series. *Fix:* implement a Kalman-filter exact-likelihood
   estimator (the `statespace` module already has the scalar case).
-- **PACF** -  inferust's `pacf` returns the last coefficient of OLS-AR(k) for
-  each `k`, equivalent to statsmodels' `method="ols"`. The default in
-  statsmodels (`method="ywm"`, Yule-Walker with bias correction) is reported
-  in the fixture. We tolerate `5e-3` and a tighter parity will require either
-  switching the default method or exposing both.
+- **PACF** -  `pacf()` defaults to Yule-Walker (`method="ywm"`). Use `pacf_with_method(..., PacfMethod::Ols)` for the legacy OLS-AR partial coefficients.
 - **Mann-Whitney U sign convention** -  inferust returns `min(U1, U2)`; scipy
   returns `U1` by default. The two-sided p-value is identical; only the U
   reported differs. The test accepts both sides.

@@ -2,6 +2,23 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.1.22] - 2026-07-06
+
+### Changed
+
+- **PACF default** -  `pacf()` now uses `PacfMethod::YuleWalker` (statsmodels `method="ywm"`);
+  OLS-AR remains available via `PacfMethod::Ols` or `pacf_with_method`.
+- **ZIP result layout** -  count and inflation coefficient blocks now match statsmodels
+  `ZeroInflatedPoisson` parameter order.
+- **Ordered logit** -  batched linear-predictor accumulation in the gradient loop.
+
+### Fixed
+
+- **Discrete parity** -  ZIP block mapping, multinomial parameter layout, ordered-logit
+  threshold checks; tightened NB2/ZIP/MNLogit tolerances.
+- **Docs** -  replaced em dashes with hyphens in user-facing README, CHANGELOG, and
+  crate metadata (crates.io listing).
+
 ## [0.1.21] - 2026-07-06
 
 ### Added

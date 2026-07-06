@@ -29,11 +29,9 @@ fn parity_pacf() {
     let y = as_f64_vec(&fx["dataset"]["y"]);
     let lags = fx["dataset"]["lags"].as_u64().expect("lags") as usize;
     let pacf = time_series::pacf(&y, lags).expect("pacf failed");
-    // statsmodels PACF (Yule-Walker method "ywm") and inferust's OLS-AR PACF
-    // diverge at higher lags; allow 1e-2 absolute tolerance.
     assert_parity(
         "pacf",
-        vec![check_vec("pacf", &pacf, &as_f64_vec(&fx["pacf"]), 1e-2)],
+        vec![check_vec("pacf", &pacf, &as_f64_vec(&fx["pacf"]), 1e-10)],
     );
 }
 
