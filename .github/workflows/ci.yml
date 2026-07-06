@@ -48,3 +48,6 @@ jobs:
 
       - name: Build benchmark example
         run: cargo build --release --example bench_all
+
+      - name: Smoke benchmark
+        run: cargo run --release --example bench_smoke

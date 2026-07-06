@@ -2,14 +2,23 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
-## [Unreleased]
+## [0.1.17] - 2026-07-06
 
 ### Added
 
-- **Full benchmark suite** — `examples/bench_all.rs` benchmarks ~25 estimators against
-  `scripts/bench_all_statsmodels.py` with matching `key=value` output lines.
-- **Docker benchmark images** — `bench/Dockerfile.rust` and `bench/Dockerfile.python` for
-  reproducible cross-language runs; see `bench/README.md`.
+- **Performance** — shared `irls` kernel; Cox PH backward risk-set pass (O(n·p²) per NR step);
+  incremental `X'WX` for Probit, NB2, Gamma, ZIP EM; quickselect MAD; PACF
+  `DurbinLevinson` / `pacf_ywm` methods via `PacfMethod`.
+- **Parity fixtures** — discrete (Probit, NB2, MNLogit, OrderedLogit, ZIP), GEE,
+  mixed LM, and robust LM against statsmodels (`tests/parity_{discrete,gee,mixed,robust}.rs`).
+- **CI smoke benchmark** — `examples/bench_smoke.rs` (OLS, Logistic, Poisson).
+
+### Changed
+
+- ZIP default EM iterations reduced from 200 → 50; inner IRLS capped at 5 steps.
+- Ordered logit line search uses LL-only evals (no full BHHH per backtrack step).
+
+## [Unreleased]
 
 ## [0.1.16] - 2026-06-22
 

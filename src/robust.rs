@@ -160,15 +160,22 @@ fn sandwich_se(
     let w_diag = DMatrix::from_diagonal(&DVector::from_vec(weights.to_vec()));
     let xtwx = x_mat.transpose() * &w_diag * &x_mat;
 
-    let psi_sq: Vec<f64> = residuals
-        .iter()
-        .map(|&r| {
-            let p = huber_psi(r / scale, norm);
-            p * p
-        })
-        .collect();
-    let psi_mat = DMatrix::from_diagonal(&DVector::from_vec(psi_sq));
-    let meat = x_mat.transpose() * psi_mat * &x_mat;
+    let mut meat = DMatrix::zeros(k, k);
+    for i in 0..n {
+        let psi = huber_psi(residuals[i] / scale, norm);
+        let psi2 = psi * psi;
+        for j in 0..k {
+            let xij = x_mat[(i, j)];
+            for l in 0..=j {
+                meat[(j, l)] += psi2 * xij * x_mat[(i, l)];
+            }
+        }
+    }
+    for j in 0..k {
+        for l in 0..j {
+            meat[(l, j)] = meat[(j, l)];
+        }
+    }
 
     let bread_inv = match xtwx.try_inverse() {
         Some(inv) => inv,
@@ -205,14 +212,54 @@ fn huber_weight(value: f64, norm: RobustNorm) -> f64 {
 }
 
 fn mad_scale(values: &[f64]) -> f64 {
-    let mut abs = values.iter().map(|v| v.abs()).collect::<Vec<_>>();
-    abs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    let median = if abs.len() % 2 == 0 {
-        (abs[abs.len() / 2 - 1] + abs[abs.len() / 2]) / 2.0
-    } else {
-        abs[abs.len() / 2]
-    };
+    let mut abs: Vec<f64> = values.iter().map(|v| v.abs()).collect();
+    let median = quickselect_median(&mut abs);
     median / 0.6744897501960817
+}
+
+fn quickselect_median(values: &mut [f64]) -> f64 {
+    let n = values.len();
+    if n == 0 {
+        return 0.0;
+    }
+    let mid = n / 2;
+    quickselect(values, mid);
+    if n.is_multiple_of(2) {
+        let upper = values[mid];
+        quickselect(&mut values[..mid + 1], mid - 1);
+        (values[mid - 1] + upper) / 2.0
+    } else {
+        values[mid]
+    }
+}
+
+fn quickselect(slice: &mut [f64], k: usize) {
+    let mut left = 0usize;
+    let mut right = slice.len().saturating_sub(1);
+    loop {
+        if left >= right {
+            return;
+        }
+        let pivot = slice_partition(slice, left, right);
+        match k.cmp(&pivot) {
+            std::cmp::Ordering::Equal => return,
+            std::cmp::Ordering::Less => right = pivot.saturating_sub(1),
+            std::cmp::Ordering::Greater => left = pivot + 1,
+        }
+    }
+}
+
+fn slice_partition(slice: &mut [f64], left: usize, right: usize) -> usize {
+    let pivot_val = slice[right];
+    let mut store = left;
+    for i in left..right {
+        if slice[i] <= pivot_val {
+            slice.swap(i, store);
+            store += 1;
+        }
+    }
+    slice.swap(store, right);
+    store
 }
 
 #[cfg(test)]

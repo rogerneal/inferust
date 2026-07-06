@@ -6,6 +6,7 @@ use statrs::function::gamma::digamma;
 
 use crate::error::{InferustError, Result};
 use crate::glm::Poisson;
+use crate::irls::{accumulate_xtwx, irls_weighted_solve, mat_vec_mul};
 
 // ─── Probit ──────────────────────────────────────────────────────────────────
 
@@ -87,7 +88,7 @@ impl Probit {
 
         for _iter in 0..self.max_iter {
             iterations += 1;
-            let eta: Vec<f64> = (x_mat.clone() * &beta).iter().cloned().collect();
+            let eta = mat_vec_mul(&x_mat, &beta);
             let mu: Vec<f64> = eta.iter().map(|&e| normal.cdf(e)).collect();
             let pdf: Vec<f64> = eta.iter().map(|&e| normal.pdf(e).max(1e-15)).collect();
 
@@ -99,14 +100,7 @@ impl Probit {
                 .collect();
             let z: Vec<f64> = (0..n).map(|i| eta[i] + (y[i] - mu[i]) / pdf[i]).collect();
 
-            let w_diag = DMatrix::from_diagonal(&DVector::from_vec(w.clone()));
-            let xtwx = x_mat.transpose() * &w_diag * &x_mat;
-            let xtwz = x_mat.transpose() * &w_diag * DVector::from_vec(z);
-            let new_beta = xtwx
-                .clone()
-                .lu()
-                .solve(&xtwz)
-                .ok_or(InferustError::SingularMatrix)?;
+            let new_beta = irls_weighted_solve(&x_mat, &w, &z)?;
             let delta = (&new_beta - &beta).norm();
             beta = new_beta;
             if delta < self.tolerance {
@@ -115,7 +109,7 @@ impl Probit {
         }
 
         // Final fitted values and log-likelihood
-        let eta_final: Vec<f64> = (x_mat.clone() * &beta).iter().cloned().collect();
+        let eta_final = mat_vec_mul(&x_mat, &beta);
         let fitted_probabilities: Vec<f64> = eta_final.iter().map(|&e| normal.cdf(e)).collect();
         let log_likelihood = binary_log_likelihood(y, &fitted_probabilities);
 
@@ -130,8 +124,7 @@ impl Probit {
                 pdf_f[i] * pdf_f[i] / (m * (1.0 - m))
             })
             .collect();
-        let w_diag_f = DMatrix::from_diagonal(&DVector::from_vec(w_f));
-        let info = x_mat.transpose() * &w_diag_f * &x_mat;
+        let info = accumulate_xtwx(&x_mat, &w_f, k);
         let cov = info.try_inverse().ok_or(InferustError::SingularMatrix)?;
         let std_errors: Vec<f64> = (0..k).map(|j| cov[(j, j)].max(0.0).sqrt()).collect();
 
@@ -311,23 +304,16 @@ impl NegativeBinomial {
             let old_alpha = alpha;
 
             // IRLS step for β (α fixed)
-            let eta: Vec<f64> = (x_mat.clone() * &beta).iter().cloned().collect();
+            let eta = mat_vec_mul(&x_mat, &beta);
             let mu: Vec<f64> = eta.iter().map(|&e| e.exp().max(1e-12)).collect();
             let w: Vec<f64> = mu.iter().map(|&m| m / (1.0 + alpha * m)).collect();
             let z: Vec<f64> = (0..n).map(|i| eta[i] + (y[i] - mu[i]) / mu[i]).collect();
 
-            let w_diag = DMatrix::from_diagonal(&DVector::from_vec(w));
-            let xtwx = x_mat.transpose() * &w_diag * &x_mat;
-            let xtwz = x_mat.transpose() * &w_diag * DVector::from_vec(z);
-            beta = xtwx
-                .clone()
-                .lu()
-                .solve(&xtwz)
-                .ok_or(InferustError::SingularMatrix)?;
+            beta = irls_weighted_solve(&x_mat, &w, &z)?;
 
             // Newton step for α (β fixed) — only when alpha is not fixed by user
             if self.alpha.is_none() {
-                let eta2: Vec<f64> = (x_mat.clone() * &beta).iter().cloned().collect();
+                let eta2 = mat_vec_mul(&x_mat, &beta);
                 let mu2: Vec<f64> = eta2.iter().map(|&e| e.exp().max(1e-12)).collect();
                 alpha = nb2_alpha_newton(y, &mu2, alpha, 5);
             }
@@ -339,7 +325,7 @@ impl NegativeBinomial {
             }
         }
 
-        let eta_f: Vec<f64> = (x_mat.clone() * &beta).iter().cloned().collect();
+        let eta_f = mat_vec_mul(&x_mat, &beta);
         let fitted_values: Vec<f64> = eta_f.iter().map(|&e| e.exp().max(1e-12)).collect();
 
         // Log-likelihood
@@ -351,8 +337,7 @@ impl NegativeBinomial {
             .iter()
             .map(|&m| m / (1.0 + alpha * m))
             .collect();
-        let w_diag_f = DMatrix::from_diagonal(&DVector::from_vec(w_f));
-        let info = x_mat.transpose() * &w_diag_f * &x_mat;
+        let info = accumulate_xtwx(&x_mat, &w_f, k);
         let cov = info.try_inverse().ok_or(InferustError::SingularMatrix)?;
         let std_errors: Vec<f64> = (0..k).map(|j| cov[(j, j)].max(0.0).sqrt()).collect();
 
@@ -826,12 +811,13 @@ impl OrderedLogit {
             }
             // Armijo backtracking: find step t so LL(θ + t·g) ≥ LL(θ) + 0.1·t·‖g‖²
             let mut step = 1.0_f64;
-            for _ in 0..40 {
+            for _ in 0..15 {
                 let theta_try = &theta + step * &grad;
                 let cuts_try = decode_cutpoints(&theta_try, km1);
-                let (neg_ll_try, _, _) =
-                    ordinal_ll_grad_hess(&x_mat, &y_idx, &cuts_try, &theta_try, n, p, km1);
-                if -neg_ll_try >= ll + 0.1 * step * grad_sq {
+                let beta_try: Vec<f64> = (0..p).map(|j| theta_try[km1 + j]).collect();
+                let ll_try =
+                    ordinal_log_likelihood(&x_mat, &y_idx, &cuts_try, &beta_try, n, p, km1);
+                if ll_try >= ll + 0.1 * step * grad_sq {
                     break;
                 }
                 step *= 0.5;
@@ -960,11 +946,40 @@ fn cutpoint_jacobian(theta: &DVector<f64>, km1: usize) -> DMatrix<f64> {
     jac
 }
 
-/// Compute log-likelihood, gradient, and Hessian for the proportional-odds model.
-/// Parameters: theta = (reparameterised cuts 0..km1, slopes km1..).
+/// Log-likelihood only (for line search).
+fn ordinal_log_likelihood(
+    x_mat: &DMatrix<f64>,
+    y_idx: &[usize],
+    cuts: &[f64],
+    beta: &[f64],
+    n: usize,
+    p: usize,
+    km1: usize,
+) -> f64 {
+    let mut ll = 0.0;
+    for i in 0..n {
+        let k = y_idx[i];
+        let xb: f64 = (0..p).map(|j| x_mat[(i, j)] * beta[j]).sum();
+        let cdf_k = if k == km1 {
+            1.0
+        } else {
+            logistic_cdf(cuts[k] - xb)
+        };
+        let cdf_km1 = if k == 0 {
+            0.0
+        } else {
+            logistic_cdf(cuts[k - 1] - xb)
+        };
+        let prob = (cdf_k - cdf_km1).max(1e-15);
+        ll += prob.ln();
+    }
+    ll
+}
+
 /// Compute log-likelihood, gradient, and BHHH (outer-product) Hessian for the
 /// proportional-odds ordinal model.
 ///
+/// Parameters: theta = (reparameterised cuts 0..km1, slopes km1..).
 /// The BHHH Hessian approximation H ≈ -Σᵢ gᵢ gᵢᵀ covers all parameter blocks
 /// (cutpoints AND slopes) and is always negative semi-definite, avoiding the
 /// singular-matrix issue that arises when the analytical Hessian is only
@@ -1083,7 +1098,7 @@ impl ZeroInflatedPoisson {
         Self {
             feature_names: Vec::new(),
             inflation_feature_names: Vec::new(),
-            max_iter: 200,
+            max_iter: 50,
             tolerance: 1e-6,
         }
     }
@@ -1167,7 +1182,7 @@ impl ZeroInflatedPoisson {
             // M-step for count model: weighted Poisson with weights (1 - tau_i)
             let w_count: Vec<f64> = tau.iter().map(|&t| (1.0 - t).max(1e-10)).collect();
             // Weighted Poisson via IRLS with initial offset from current mu
-            let new_count_fit = weighted_poisson_irls(x, y, &w_count, &count_coefs, 10, 1e-8)?;
+            let new_count_fit = weighted_poisson_irls(x, y, &w_count, &count_coefs, 5, 1e-8)?;
             let old_count = count_coefs.clone();
             count_coefs = new_count_fit.0;
             mu = new_count_fit.1;
@@ -1175,7 +1190,7 @@ impl ZeroInflatedPoisson {
             // M-step for inflation model: logistic with tau_i as response
             // Use IRLS for logistic regression with updated tau
             let new_infl_fit =
-                weighted_logistic_irls(inflation_x, &tau, &vec![1.0; n], &infl_coefs, 10, 1e-8)?;
+                weighted_logistic_irls(inflation_x, &tau, &vec![1.0; n], &infl_coefs, 5, 1e-8)?;
             let old_infl = infl_coefs.clone();
             infl_coefs = new_infl_fit.0;
             pi = new_infl_fit.1;
@@ -1281,25 +1296,19 @@ fn weighted_poisson_irls(
     }
     let mut beta = DVector::from_vec(init.to_vec());
     for _ in 0..max_iter {
-        let eta: Vec<f64> = (x_mat.clone() * &beta).iter().cloned().collect();
+        let eta = mat_vec_mul(&x_mat, &beta);
         let mu: Vec<f64> = eta.iter().map(|&e| e.exp().max(1e-12)).collect();
         // IRLS: combined weights = w_i * mu_i (Poisson Fisher info × EM weight)
         let w: Vec<f64> = (0..n).map(|i| weights[i] * mu[i]).collect();
         let z: Vec<f64> = (0..n).map(|i| eta[i] + (y[i] - mu[i]) / mu[i]).collect();
-        let w_diag = DMatrix::from_diagonal(&DVector::from_vec(w));
-        let xtwx = x_mat.transpose() * &w_diag * &x_mat;
-        let xtwz = x_mat.transpose() * &w_diag * DVector::from_vec(z);
-        let new_beta = xtwx
-            .lu()
-            .solve(&xtwz)
-            .ok_or(InferustError::SingularMatrix)?;
+        let new_beta = irls_weighted_solve(&x_mat, &w, &z)?;
         let delta = (&new_beta - &beta).norm();
         beta = new_beta;
         if delta < tol {
             break;
         }
     }
-    let eta_f: Vec<f64> = (x_mat * &beta).iter().cloned().collect();
+    let eta_f = mat_vec_mul(&x_mat, &beta);
     let mu_f: Vec<f64> = eta_f.iter().map(|&e| e.exp().max(1e-12)).collect();
     Ok((beta.iter().cloned().collect(), mu_f))
 }
@@ -1324,7 +1333,7 @@ fn weighted_logistic_irls(
     }
     let mut beta = DVector::from_vec(init.to_vec());
     for _ in 0..max_iter {
-        let eta: Vec<f64> = (x_mat.clone() * &beta).iter().cloned().collect();
+        let eta = mat_vec_mul(&x_mat, &beta);
         let mu: Vec<f64> = eta.iter().map(|&e| logistic_cdf(e)).collect();
         let w: Vec<f64> = mu.iter().map(|&m| m * (1.0 - m)).collect();
         let z: Vec<f64> = (0..n)
@@ -1333,20 +1342,14 @@ fn weighted_logistic_irls(
                 eta[i] + (y[i] - m) / (m * (1.0 - m))
             })
             .collect();
-        let w_diag = DMatrix::from_diagonal(&DVector::from_vec(w));
-        let xtwx = x_mat.transpose() * &w_diag * &x_mat;
-        let xtwz = x_mat.transpose() * &w_diag * DVector::from_vec(z);
-        let new_beta = xtwx
-            .lu()
-            .solve(&xtwz)
-            .ok_or(InferustError::SingularMatrix)?;
+        let new_beta = irls_weighted_solve(&x_mat, &w, &z)?;
         let delta = (&new_beta - &beta).norm();
         beta = new_beta;
         if delta < tol {
             break;
         }
     }
-    let eta_f: Vec<f64> = (x_mat * &beta).iter().cloned().collect();
+    let eta_f = mat_vec_mul(&x_mat, &beta);
     let pi_f: Vec<f64> = eta_f.iter().map(|&e| logistic_cdf(e)).collect();
     Ok((beta.iter().cloned().collect(), pi_f))
 }
@@ -1360,8 +1363,7 @@ fn poisson_fisher_se(x: &[Vec<f64>], w: &[f64], k: usize) -> Vec<f64> {
             x_mat[(i, j + 1)] = v;
         }
     }
-    let w_diag = DMatrix::from_diagonal(&DVector::from_vec(w.to_vec()));
-    let info = x_mat.transpose() * &w_diag * &x_mat;
+    let info = accumulate_xtwx(&x_mat, w, k);
     match info.try_inverse() {
         Some(cov) => (0..k).map(|j| cov[(j, j)].max(0.0).sqrt()).collect(),
         None => vec![f64::NAN; k],

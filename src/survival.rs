@@ -568,33 +568,44 @@ impl CoxPhResult {
 
 /// Breslow partial log-likelihood for sorted data.
 fn cox_partial_ll(times: &[f64], events: &[usize], x: &[Vec<f64>], beta: &[f64]) -> f64 {
-    let n = times.len();
-    let xb: Vec<f64> = x
+    let _ = times;
+    let n = x.len();
+    let exp_xb: Vec<f64> = x
         .iter()
-        .map(|row| row.iter().zip(beta).map(|(xi, b)| xi * b).sum())
+        .map(|row| {
+            row.iter()
+                .zip(beta)
+                .map(|(xi, b)| xi * b)
+                .sum::<f64>()
+                .exp()
+        })
         .collect();
-    let exp_xb: Vec<f64> = xb.iter().map(|v| v.exp()).collect();
 
+    let mut s0 = 0.0_f64;
     let mut ll = 0.0;
-    for i in 0..n {
-        if events[i] != 1 {
-            continue;
+    for j in (0..n).rev() {
+        let w = exp_xb[j];
+        s0 += w;
+        if events[j] == 1 {
+            let xb_j: f64 = x[j].iter().zip(beta).map(|(xi, b)| xi * b).sum();
+            ll += xb_j - s0.ln();
         }
-        // Risk set: all j with t_j >= t_i
-        let risk_sum: f64 = (i..n).map(|j| exp_xb[j]).sum();
-        ll += xb[i] - risk_sum.ln();
     }
     ll
 }
 
 /// Score vector and observed information (negated Hessian) for sorted data.
+///
+/// Uses a backward cumulative risk-set pass so each Newton step is O(n·p²)
+/// instead of O(n_events·n·p²).
 fn cox_score_hessian(
     times: &[f64],
     events: &[usize],
     x: &[Vec<f64>],
     beta: &[f64],
 ) -> (Vec<f64>, Vec<Vec<f64>>) {
-    let n = times.len();
+    let _ = times;
+    let n = x.len();
     let p = beta.len();
     let exp_xb: Vec<f64> = x
         .iter()
@@ -610,29 +621,24 @@ fn cox_score_hessian(
     let mut score = vec![0.0_f64; p];
     let mut info = vec![vec![0.0_f64; p]; p];
 
-    for i in 0..n {
-        if events[i] != 1 {
-            continue;
-        }
-        // Risk set: j with t_j >= t_i (data is sorted, so j >= i)
-        let mut s0 = 0.0_f64;
-        let mut s1 = vec![0.0_f64; p];
-        let mut s2 = vec![vec![0.0_f64; p]; p];
-        for j in i..n {
-            let w = exp_xb[j];
-            s0 += w;
-            for k in 0..p {
-                s1[k] += w * x[j][k];
-                for l in 0..p {
-                    s2[k][l] += w * x[j][k] * x[j][l];
-                }
+    let mut s0 = 0.0_f64;
+    let mut s1 = vec![0.0_f64; p];
+    let mut s2 = vec![vec![0.0_f64; p]; p];
+
+    for j in (0..n).rev() {
+        let w = exp_xb[j];
+        s0 += w;
+        for k in 0..p {
+            s1[k] += w * x[j][k];
+            for l in 0..p {
+                s2[k][l] += w * x[j][k] * x[j][l];
             }
         }
-        if s0 < f64::EPSILON {
+        if events[j] != 1 || s0 < f64::EPSILON {
             continue;
         }
         for k in 0..p {
-            score[k] += x[i][k] - s1[k] / s0;
+            score[k] += x[j][k] - s1[k] / s0;
             for l in 0..p {
                 info[k][l] += s2[k][l] / s0 - (s1[k] / s0) * (s1[l] / s0);
             }

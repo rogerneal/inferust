@@ -758,16 +758,90 @@ pub fn acf(series: &[f64], max_lag: usize) -> Result<Vec<f64>> {
         .collect())
 }
 
+/// PACF estimation method.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PacfMethod {
+    /// OLS-AR: fit AR(k) for each lag k and take the last coefficient.
+    #[default]
+    Ols,
+    /// Durbin-Levinson recursion on the sample ACF (equivalent to OLS-AR for full lags).
+    DurbinLevinson,
+    /// Yule-Walker with bias correction (statsmodels `method="ywm"`).
+    YuleWalker,
+}
+
 /// Sample partial autocorrelation function for lags 0 to `max_lag`.
 ///
 /// Returns a vector of length `max_lag + 1`; element 0 is always 1.0.
 pub fn pacf(series: &[f64], max_lag: usize) -> Result<Vec<f64>> {
+    pacf_with_method(series, max_lag, PacfMethod::default())
+}
+
+/// PACF with an explicit estimation method.
+pub fn pacf_with_method(
+    series: &[f64],
+    max_lag: usize,
+    method: PacfMethod,
+) -> Result<Vec<f64>> {
+    match method {
+        PacfMethod::Ols => pacf_ols(series, max_lag),
+        PacfMethod::DurbinLevinson | PacfMethod::YuleWalker => pacf_durbin_levinson(series, max_lag),
+    }
+}
+
+/// Yule-Walker biased PACF matching statsmodels `pacf(method="ywm")`.
+pub fn pacf_ywm(series: &[f64], max_lag: usize) -> Result<Vec<f64>> {
+    pacf_with_method(series, max_lag, PacfMethod::YuleWalker)
+}
+
+fn pacf_ols(series: &[f64], max_lag: usize) -> Result<Vec<f64>> {
     let mut out = vec![1.0_f64];
     for lag in 1..=max_lag {
         let fit = AutoRegressive::new(lag).fit(series)?;
         out.push(*fit.coefficients.last().unwrap_or(&0.0));
     }
     Ok(out)
+}
+
+fn pacf_durbin_levinson(series: &[f64], max_lag: usize) -> Result<Vec<f64>> {
+    let n = series.len();
+    if n < 2 {
+        return Err(InferustError::InsufficientData { needed: 2, got: n });
+    }
+    let mean = series.iter().sum::<f64>() / n as f64;
+    let gamma: Vec<f64> = (0..=max_lag)
+        .map(|lag| {
+            series
+                .iter()
+                .skip(lag)
+                .zip(series.iter())
+                .map(|(a, b)| (a - mean) * (b - mean))
+                .sum::<f64>()
+                / n as f64
+        })
+        .collect();
+    if gamma[0].abs() < f64::EPSILON {
+        return Ok(vec![1.0; max_lag + 1]);
+    }
+    let mut phi = vec![0.0_f64; max_lag + 1];
+    let mut pacf = vec![1.0_f64];
+    let mut sigma = gamma[0];
+    for k in 1..=max_lag {
+        let mut num = gamma[k];
+        for j in 1..k {
+            num -= phi[j] * gamma[k - j];
+        }
+        let phi_kk = num / sigma.max(f64::EPSILON);
+        let mut phi_new = vec![0.0_f64; k + 1];
+        phi_new[k] = phi_kk;
+        for j in 1..k {
+            phi_new[j] = phi[j] - phi_kk * phi[k - j];
+        }
+        phi = phi_new;
+        sigma *= 1.0 - phi_kk * phi_kk;
+        pacf.push(phi_kk);
+    }
+    Ok(pacf)
 }
 
 /// Ljung-Box portmanteau test for autocorrelation up to `max_lag`.

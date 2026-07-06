@@ -2,6 +2,7 @@ use nalgebra::{DMatrix, DVector};
 use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
 use crate::error::{InferustError, Result};
+use crate::irls::irls_weighted_solve;
 
 /// GLM residual vectors using common statsmodels-compatible definitions.
 #[derive(Debug, Clone)]
@@ -1256,15 +1257,7 @@ impl Gamma {
                 z[i] = eta[i] + (y[i] - mu_i) / safe_slope;
             }
 
-            let w_diag = DMatrix::from_diagonal(&DVector::from_vec(w));
-            let xtw = x_mat.transpose() * &w_diag;
-            let xtwx = &xtw * &x_mat;
-            let xtwz = &xtw * DVector::from_vec(z);
-            let new_beta = xtwx
-                .clone()
-                .lu()
-                .solve(&xtwz)
-                .ok_or(InferustError::SingularMatrix)?;
+            let new_beta = irls_weighted_solve(&x_mat, &w, &z)?;
             let max_delta = (&new_beta - &beta)
                 .iter()
                 .map(|v| v.abs())

@@ -447,7 +447,8 @@ For tougher or poorly conditioned designs, call `.stable()` or `.with_solver(Ols
 
 ## Changelog
 
-Release history is tracked in [CHANGELOG.md](CHANGELOG.md), with an `Unreleased` section reserved for the next version before publication.
+- **v0.1.17** — IRLS performance pass (Cox PH, Probit, Gamma, ZIP EM), PACF methods,
+  discrete/GEE/mixed/robust parity fixtures, full benchmark suite.
 
 ---
 
@@ -471,15 +472,24 @@ cargo run --release --example bench_all
 python3 scripts/bench_all_statsmodels.py   # requires numpy, scipy, statsmodels, lifelines, pandas
 ```
 
+**CI smoke benchmark** (5,000 rows, OLS + Logistic + Poisson):
+
+```bash
+cargo run --release --example bench_smoke
+```
+
 See [bench/README.md](bench/README.md) for Docker-based reproducible runs.
 
-On the current local benchmark machine, the 10,000 row × 8 feature OLS case measured approximately:
+On the current local benchmark machine (Apple Silicon, release build):
 
-| Engine | Solver | Median fit time |
-|--------|--------|-----------------|
-| `inferust` | Cholesky | 0.769 ms |
-| `inferust` | SVD | 2.474 ms |
-| `statsmodels` | default OLS | 2.492 ms |
+| Case | Median fit time |
+|------|-----------------|
+| OLS 10k × 8 features (Cholesky) | 0.769 ms |
+| OLS 10k × 8 features (SVD) | 2.474 ms |
+| statsmodels OLS (same data) | 2.492 ms |
+| Smoke OLS 5k × 4 features | 0.568 ms |
+| Smoke Logistic 5k × 4 | 1.903 ms |
+| Smoke Poisson 5k × 4 | 2.436 ms |
 
 Benchmark results vary by machine and BLAS/LAPACK configuration, so treat these as a local smoke test rather than a universal claim. The checksum printed by each script is useful for confirming both implementations fit equivalent data.
 

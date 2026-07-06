@@ -87,6 +87,7 @@ pub mod gmm;
 pub mod graphics;
 pub mod hypothesis;
 pub mod imputation;
+mod irls;
 pub mod mixed;
 pub mod multivariate;
 pub mod plot;
