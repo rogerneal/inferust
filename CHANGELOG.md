@@ -2,6 +2,16 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.1.17] - 2026-07-06
+
+### Added
+
+- **State-space Kalman filter** (`statespace::LinearGaussianModel`) — multivariate
+  linear-Gaussian filtering with exact Gaussian log-likelihood for ARMA models.
+- **Exact ARIMA MLE** — `Arima::exact_mle()` / `ArimaMethod::ExactMle` fits
+  MA components via state-space MLE instead of conditional sum of squares.
+  `Sarima::exact_mle()` uses the same engine when seasonal orders are zero.
+
 ## [0.1.16] - 2026-06-22
 
 ### Added
