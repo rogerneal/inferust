@@ -453,27 +453,27 @@ Release history is tracked in [CHANGELOG.md](CHANGELOG.md), with an `Unreleased`
 
 ## Benchmarks
 
-The repository includes reproducible OLS benchmark scripts for comparing `inferust` with Python `statsmodels` on deterministic synthetic data. Build and run the Rust benchmark in release mode:
+The repository includes reproducible benchmark scripts for comparing `inferust`
+with Python `statsmodels` on deterministic synthetic data.
+
+**OLS only** (configurable rows, features, solver):
 
 ```bash
 cargo run --release --example bench_ols -- --rows 10000 --features 8 --repeats 10 --warmups 2
 cargo run --release --example bench_ols -- --solver svd --rows 10000 --features 8 --repeats 10 --warmups 2
-```
-
-Additional examples:
-
-```bash
-cargo run --example diagnostics
-cargo run --example discrete_models
-```
-
-Run the Python comparison after installing `numpy`, `scipy`, and `statsmodels`:
-
-```bash
 python scripts/bench_statsmodels.py --rows 10000 --features 8 --repeats 10 --warmups 2
 ```
 
-On the current local benchmark machine, the 10,000 row × 8 feature case measured approximately:
+**Full estimator suite** (~25 estimators, 10,000 rows):
+
+```bash
+cargo run --release --example bench_all
+python3 scripts/bench_all_statsmodels.py   # requires numpy, scipy, statsmodels, lifelines, pandas
+```
+
+See [bench/README.md](bench/README.md) for Docker-based reproducible runs.
+
+On the current local benchmark machine, the 10,000 row × 8 feature OLS case measured approximately:
 
 | Engine | Solver | Median fit time |
 |--------|--------|-----------------|

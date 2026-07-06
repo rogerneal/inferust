@@ -1,0 +1,4 @@
+FROM python:3.12-slim
+RUN pip install --no-cache-dir numpy statsmodels lifelines pandas scipy
+COPY scripts/bench_all_statsmodels.py /bench.py
+ENTRYPOINT ["python3", "/bench.py"]

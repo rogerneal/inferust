@@ -2,6 +2,15 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [Unreleased]
+
+### Added
+
+- **Full benchmark suite** — `examples/bench_all.rs` benchmarks ~25 estimators against
+  `scripts/bench_all_statsmodels.py` with matching `key=value` output lines.
+- **Docker benchmark images** — `bench/Dockerfile.rust` and `bench/Dockerfile.python` for
+  reproducible cross-language runs; see `bench/README.md`.
+
 ## [0.1.16] - 2026-06-22
 
 ### Added

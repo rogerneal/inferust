@@ -4,3 +4,5 @@ Cargo.lock
 .DS_Store
 __pycache__/
 *.pyc
+bench/bench_*
+!bench/README.md

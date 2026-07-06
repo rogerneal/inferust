@@ -45,3 +45,6 @@ jobs:
 
       - name: Run example
         run: cargo run --example basic_ols
+
+      - name: Build benchmark example
+        run: cargo build --release --example bench_all

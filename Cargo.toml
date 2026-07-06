@@ -36,6 +36,10 @@ path = "examples/diagnostics.rs"
 name = "discrete_models"
 path = "examples/discrete_models.rs"
 
+[[example]]
+name = "bench_all"
+path = "examples/bench_all.rs"
+
 [[test]]
 name = "parity_ols"
 path = "tests/parity_ols.rs"
