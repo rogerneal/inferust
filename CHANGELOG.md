@@ -2,6 +2,20 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.1.20] - 2026-07-06
+
+### Added
+
+- **GEE parity** — `gee_poisson` statsmodels fixture and `tests/parity_gee.rs`.
+- **Generic GLM parity** — `tests/parity_glm_family.rs`; `GlmFamily::InverseGaussian`
+  dispatch and `GlmResult::coefficients()`.
+- **VAR impulse responses** — `VarResult::impulse_response` with Cholesky identification.
+- **OLS column-major API** — `Ols::fit_column_major` for BLAS-friendly layouts.
+- **Post-estimation trait** — `post_estimation::ModelResult` and
+  `wald_linear_contrast` across OLS/GLM results.
+- **Polars bridge** — optional `polars` feature with `polars_bridge::from_polars`.
+- **Panel FE** — `panel::PanelOls::fit_entity_fe` and `two_way_cluster_ids` helper.
+
 ## [0.1.19] - 2026-07-06
 
 ### Added

@@ -1271,6 +1271,30 @@ def run_zip(n: int, k: int, seed: int) -> dict[str, Any]:
     }
 
 
+def run_gee_poisson(n: int, k: int, seed: int) -> dict[str, Any]:
+    from statsmodels.genmod.cov_struct import Exchangeable
+    from statsmodels.genmod.families import Poisson
+    from statsmodels.genmod.generalized_estimating_equations import GEE
+
+    x, y = dataset_poisson(n, k, seed)
+    xc = sm.add_constant(x, has_constant="add")
+    clusters = np.array([(i % 10) for i in range(n)], dtype=int)
+    res = GEE(y, xc, groups=clusters, family=Poisson(), cov_struct=Exchangeable()).fit()
+    return {
+        "kind": "gee_poisson",
+        "dataset": {
+            "n": n,
+            "k": k,
+            "seed": seed,
+            "clusters": clusters.tolist(),
+            **_xy_payload(x, y),
+        },
+        "params": _to_list(res.params),
+        "bse": _to_list(res.bse),
+        "llf": float(res.llf) if res.llf is not None else float("nan"),
+    }
+
+
 def run_cox(seed: int) -> dict[str, Any]:
     from statsmodels.duration.hazard_regression import PHReg
 
@@ -1401,6 +1425,7 @@ def main() -> None:
     emit(out, "multinomial_small", run_multinomial(n=240, k=2, seed=46))
     emit(out, "ordered_logit_small", run_ordered_logit(n=200, k=2, seed=47))
     emit(out, "zip_small", run_zip(n=200, k=2, seed=48))
+    emit(out, "gee_poisson", run_gee_poisson(n=200, k=2, seed=49))
 
     print(f"\nstatsmodels version: {sm.__version__}")
 
