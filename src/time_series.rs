@@ -913,6 +913,96 @@ impl VarResult {
         }
         Ok(out)
     }
+
+    /// Orthogonalized impulse responses for `periods` horizons.
+    ///
+    /// Returns `irf[horizon][shocked_var][response_var]` using a Cholesky
+    /// identification of the residual covariance.
+    pub fn impulse_response(&self, periods: usize) -> Result<Vec<Vec<Vec<f64>>>> {
+        if periods == 0 {
+            return Ok(vec![]);
+        }
+        let sigma = residual_covariance(&self.residuals);
+        let chol = cholesky_lower(&sigma)?;
+        let companion = companion_matrix(self);
+        let state_dim = companion.nrows();
+        let mut responses = vec![vec![vec![0.0; self.k]; self.k]; periods];
+
+        for j in 0..self.k {
+            let mut shock = DVector::zeros(state_dim);
+            for i in 0..self.k {
+                shock[i] = chol[i][j];
+            }
+            let mut state = shock;
+            for h in 0..periods {
+                let out = &companion * &state;
+                for i in 0..self.k {
+                    responses[h][j][i] = out[i];
+                }
+                state = out;
+            }
+        }
+        Ok(responses)
+    }
+}
+
+fn residual_covariance(residuals: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let k = residuals.len();
+    let n = residuals[0].len();
+    let mut sigma = vec![vec![0.0; k]; k];
+    for i in 0..k {
+        for j in 0..k {
+            sigma[i][j] = (0..n)
+                .map(|t| residuals[i][t] * residuals[j][t])
+                .sum::<f64>()
+                / n.max(1) as f64;
+        }
+    }
+    sigma
+}
+
+fn cholesky_lower(matrix: &[Vec<f64>]) -> Result<Vec<Vec<f64>>> {
+    let n = matrix.len();
+    let mut l = vec![vec![0.0; n]; n];
+    for i in 0..n {
+        for j in 0..=i {
+            let mut sum = matrix[i][j];
+            for k in 0..j {
+                sum -= l[i][k] * l[j][k];
+            }
+            if i == j {
+                if sum <= 0.0 {
+                    return Err(InferustError::InvalidInput(
+                        "residual covariance is not positive definite".into(),
+                    ));
+                }
+                l[i][j] = sum.sqrt();
+            } else {
+                l[i][j] = sum / l[j][j];
+            }
+        }
+    }
+    Ok(l)
+}
+
+fn companion_matrix(result: &VarResult) -> DMatrix<f64> {
+    let k = result.k;
+    let p = result.lags;
+    let n = k * p;
+    let mut mat = DMatrix::zeros(n, n);
+    for i in 0..k {
+        for j in 0..k * p {
+            if j + 1 < result.coefficients[i].len() {
+                mat[(i, j)] = result.coefficients[i][j + 1];
+            }
+        }
+    }
+    if p > 1 {
+        for i in 0..(p - 1) * k {
+            mat[(k + i, i)] = 1.0;
+        }
+    }
+    mat
 }
 
 // ── ACF / PACF / Ljung-Box ────────────────────────────────────────────────────

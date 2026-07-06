@@ -447,6 +447,31 @@ impl Ols {
         self
     }
 
+    /// Fit from a column-major design matrix (`x_col_major[col * nrows + row]`).
+    pub fn fit_column_major(
+        &self,
+        x_col_major: &[f64],
+        nrows: usize,
+        ncols: usize,
+        y: &[f64],
+    ) -> Result<OlsResult> {
+        if x_col_major.len() != nrows * ncols {
+            return Err(InferustError::DimensionMismatch {
+                x_rows: x_col_major.len(),
+                y_len: nrows * ncols,
+            });
+        }
+        let mut x = Vec::with_capacity(nrows);
+        for i in 0..nrows {
+            let mut row = Vec::with_capacity(ncols);
+            for j in 0..ncols {
+                row.push(x_col_major[j * nrows + i]);
+            }
+            x.push(row);
+        }
+        self.fit(&x, y)
+    }
+
     /// Fit the model.
     ///
     /// * `x` – slice of rows; each row is one observation and must have the same length.
