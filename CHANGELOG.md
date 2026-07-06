@@ -2,6 +2,16 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.1.18] - 2026-07-06
+
+### Added
+
+- **Discrete-choice parity harness** — statsmodels reference fixtures and
+  `tests/parity_discrete.rs` for Probit, Negative Binomial, Multinomial Logit,
+  Ordered Logit, and Zero-Inflated Poisson.
+- **Formula API for discrete models** — `DataFrame::probit`,
+  `negative_binomial`, `multinomial`, `ordered_logit`, and `zip`.
+
 ## [0.1.17] - 2026-07-06
 
 ### Added

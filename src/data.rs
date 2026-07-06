@@ -1,6 +1,11 @@
 use std::collections::BTreeMap;
 
 use crate::error::{InferustError, Result};
+use crate::discrete::{
+    MultinomialLogit, MultinomialLogitResult, NegativeBinomial, NegativeBinomialResult,
+    OrderedLogit, OrderedLogitResult, Probit, ProbitResult, ZeroInflatedPoisson,
+    ZeroInflatedPoissonResult,
+};
 use crate::glm::{Logistic, LogisticResult, Poisson, PoissonResult};
 use crate::regression::{Ols, OlsResult, QuantileRegression, QuantileRegressionResult, Wls};
 
@@ -580,6 +585,67 @@ impl DataFrame {
             builder = builder.with_offset(offset);
         }
         builder.fit(&d.x, &d.y)
+    }
+
+    /// Fit binary probit regression from a formula.
+    pub fn probit(&self, formula: &str) -> Result<ProbitResult> {
+        let d = self.design_matrices(formula)?;
+        Probit::new()
+            .with_feature_names(d.predictor_names)
+            .max_iter(200)
+            .tolerance(1e-10)
+            .fit(&d.x, &d.y)
+    }
+
+    /// Fit NB2 negative binomial regression from a formula.
+    pub fn negative_binomial(&self, formula: &str) -> Result<NegativeBinomialResult> {
+        let d = self.design_matrices(formula)?;
+        NegativeBinomial::new()
+            .with_feature_names(d.predictor_names)
+            .max_iter(200)
+            .fit(&d.x, &d.y)
+    }
+
+    /// Fit multinomial logit regression from a formula.
+    ///
+    /// The response column must contain integer class labels (0, 1, 2, …).
+    pub fn multinomial(&self, formula: &str) -> Result<MultinomialLogitResult> {
+        let d = self.design_matrices(formula)?;
+        let y = d
+            .y
+            .into_iter()
+            .map(|v| v as usize)
+            .collect::<Vec<_>>();
+        MultinomialLogit::new()
+            .with_feature_names(d.predictor_names)
+            .max_iter(400)
+            .fit(&d.x, &y)
+    }
+
+    /// Fit proportional-odds ordered logit regression from a formula.
+    pub fn ordered_logit(&self, formula: &str) -> Result<OrderedLogitResult> {
+        let d = self.design_matrices(formula)?;
+        let y = d
+            .y
+            .into_iter()
+            .map(|v| v as usize)
+            .collect::<Vec<_>>();
+        OrderedLogit::new()
+            .with_feature_names(d.predictor_names)
+            .max_iter(400)
+            .fit(&d.x, &y)
+    }
+
+    /// Fit a zero-inflated Poisson model from a formula.
+    ///
+    /// Uses the same predictors for the count and inflation components.
+    pub fn zip(&self, formula: &str) -> Result<ZeroInflatedPoissonResult> {
+        let d = self.design_matrices(formula)?;
+        ZeroInflatedPoisson::new()
+            .with_feature_names(d.predictor_names.clone())
+            .with_inflation_feature_names(d.predictor_names)
+            .max_iter(300)
+            .fit(&d.x, &d.y, &d.x)
     }
 }
 
