@@ -2,7 +2,7 @@
 name = "inferust"
 version = "0.1.21"
 edition = "2021"
-description = "Statistical modeling for Rust — OLS/WLS regression, GLM, survival analysis, ARIMA/VAR, nonparametric tests, and more. A statsmodels-style library."
+description = "Statistical modeling for Rust - OLS/WLS regression, GLM, survival analysis, ARIMA/VAR, nonparametric tests, and more. A statsmodels-style library."
 license = "MIT"
 repository = "https://github.com/rogerneal/inferust"
 homepage = "https://github.com/rogerneal/inferust"

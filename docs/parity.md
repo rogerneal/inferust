@@ -39,7 +39,7 @@ regeneration, run `cargo test --tests parity_*` and resolve any new diffs.
 | Iterative GLM / Cox (params, bse) | `1e-5` | Newton / IRLS convergence tolerance is `1e-8` to `1e-10`; final-iterate drift dominates. |
 | GLM z-statistics, p-values | `1e-4` | Compounded from `1e-5` param drift. |
 | ACF / Ljung-Box | `1e-8` to `1e-10` | Closed form. |
-| PACF (Yule-Walker vs OLS-AR) | `5e-3` | Different methods — inferust uses OLS-AR, statsmodels' `method="ywm"` is biased differently. Tracked as a known gap, see below. |
+| PACF (Yule-Walker vs OLS-AR) | `5e-3` | Different methods -  inferust uses OLS-AR, statsmodels' `method="ywm"` is biased differently. Tracked as a known gap, see below. |
 | ADF t-statistic | `1e-7` | Both fit the same regression; should be tight. |
 | ARIMA params | (no strict parity) | inferust uses CSS, statsmodels uses MLE/statespace. Tested for plausibility only. |
 | Hypothesis tests (t, ANOVA, chi-square, MW) | `1e-9` to `1e-10` | Closed form. p-values rely on `statrs` vs `scipy` distribution implementations; small drift expected. |
@@ -83,14 +83,14 @@ modules that have at least one parity fixture today; modules listed under
 | `hypothesis` | `sign_test` | `sign_test` | counts + exact two-sided binomial p | pending first run |
 | `hypothesis` | `anderson_darling` | `anderson_darling` | raw A² (matches scipy `anderson`) | pending first run |
 | `hypothesis` | `lilliefors` | `lilliefors` | D statistic only (different p-value approx) | pending first run |
-| `hypothesis` | `ks_one_sample` | `nonparametric::ks_one_sample` | D statistic (1e-6), p-value (3e-2 — Marsaglia vs scipy expansion) | passing |
-| `hypothesis` | `ks_two_sample` | `nonparametric::ks_two_sample` | D statistic (1e-6), p-value (3e-2 — Marsaglia vs scipy expansion) | passing |
+| `hypothesis` | `ks_one_sample` | `nonparametric::ks_one_sample` | D statistic (1e-6), p-value (3e-2 -  Marsaglia vs scipy expansion) | passing |
+| `hypothesis` | `ks_two_sample` | `nonparametric::ks_two_sample` | D statistic (1e-6), p-value (3e-2 -  Marsaglia vs scipy expansion) | passing |
 | `hypothesis` | `kruskal_wallis_parity` | `nonparametric::kruskal_wallis` | H statistic (1e-6), p (1e-6) | passing |
 | `hypothesis` | `shapiro_wilk` | `nonparametric::shapiro_wilk` | W (1e-2), directional p agreement (Royston vs AS R94) | passing |
 | `hypothesis` | `chi2_goodness_of_fit` | `chisq::goodness_of_fit` | χ², p, df (1e-9) | passing |
 | `contingency` | `mcnemar` | `mcnemar` | statistic, p (1e-6) | passing |
-| `contingency` | `odds_ratio` | `table2x2`, `odds_ratio_ci` | odds_ratio (1e-9), CI bounds (loose — Wald vs Fisher exact) | passing |
-| `diagnostics` | `vif` | `variance_inflation_factors` | VIF per predictor (1e-2 — intercept in aux regression gap) | passing |
+| `contingency` | `odds_ratio` | `table2x2`, `odds_ratio_ci` | odds_ratio (1e-9), CI bounds (loose -  Wald vs Fisher exact) | passing |
+| `diagnostics` | `vif` | `variance_inflation_factors` | VIF per predictor (1e-2 -  intercept in aux regression gap) | passing |
 | `diagnostics` | `breusch_pagan` | `breusch_pagan` | LM statistic, p (1e-4) | passing |
 | `diagnostics` | `white_test` | `white_test` | LM statistic, p (1e-4) | passing |
 | `diagnostics` | `reset_test` | `reset_test` | F statistic, p (1e-4) | passing |
@@ -101,50 +101,50 @@ modules that have at least one parity fixture today; modules listed under
 | `regression::regularized` | `lasso_small` | `Lasso` | params (incl. intercept) | pending first run |
 | `regression::regularized` | `elastic_net_small` | `ElasticNet` | params (incl. intercept) | pending first run |
 | `regression` | `gls_ar1` | `Gls` (known AR(1) Ω) | params, bse, t, p | passing |
-| `regression` | `fgls_cochrane_orcutt` | `Fgls` (Cochrane-Orcutt / Prais-Winsten) | params, rho (tol 6e-2 — algorithm gap: inferust uses Prais-Winsten first-obs correction, statsmodels GLSAR uses pure C-O) | passing |
+| `regression` | `fgls_cochrane_orcutt` | `Fgls` (Cochrane-Orcutt / Prais-Winsten) | params, rho (tol 6e-2 -  algorithm gap: inferust uses Prais-Winsten first-obs correction, statsmodels GLSAR uses pure C-O) | passing |
 | `regression` | `quantreg_median`, `quantreg_q25` | `QuantileRegression` | params (tol 1e-4), pseudo_r1 (tol 1e-4) | passing |
 | `regression` | `rolling_ols` | `RollingOls` | params matrix (tol 1e-8), R² vector (tol 1e-8) | passing |
-| `regression` | `recursive_ols` | `RecursiveOls` | params at indices 10/20/30 (tol 1e-2 — Kalman vs OLS-init convention gap), cusum finiteness | passing |
+| `regression` | `recursive_ols` | `RecursiveOls` | params at indices 10/20/30 (tol 1e-2 -  Kalman vs OLS-init convention gap), cusum finiteness | passing |
 | `glm` | `gamma_glm` | `Gamma` (InversePower & Log links) | params, bse, llf, llnull, deviance, pearson_chi2, scale, AIC, BIC, fitted mean CI | pending first run |
 
 ## Known gaps
 
 These differences are documented intentionally rather than treated as bugs:
 
-- **ARIMA(p,d,q) for q > 0** — statsmodels uses MLE on the statespace
+- **ARIMA(p,d,q) for q > 0** -  statsmodels uses MLE on the statespace
   representation; inferust uses conditional-sum-of-squares with a gradient
   optimizer for q > 0 and OLS-AR for q == 0. The two estimators are
   asymptotically equivalent but diverge on small samples and on highly
   near-non-stationary series. *Fix:* implement a Kalman-filter exact-likelihood
   estimator (the `statespace` module already has the scalar case).
-- **PACF** — inferust's `pacf` returns the last coefficient of OLS-AR(k) for
+- **PACF** -  inferust's `pacf` returns the last coefficient of OLS-AR(k) for
   each `k`, equivalent to statsmodels' `method="ols"`. The default in
   statsmodels (`method="ywm"`, Yule-Walker with bias correction) is reported
   in the fixture. We tolerate `5e-3` and a tighter parity will require either
   switching the default method or exposing both.
-- **Mann-Whitney U sign convention** — inferust returns `min(U1, U2)`; scipy
+- **Mann-Whitney U sign convention** -  inferust returns `min(U1, U2)`; scipy
   returns `U1` by default. The two-sided p-value is identical; only the U
   reported differs. The test accepts both sides.
-- **OLS condition number** — inferust uses `kappa(R)` from a QR-style factor;
+- **OLS condition number** -  inferust uses `kappa(R)` from a QR-style factor;
   statsmodels uses a singular-value ratio. They agree on well-conditioned
   matrices and drift on near-singular ones; not currently compared.
-- **Tukey HSD q_crit / p-value / CI precision** — statsmodels' `pairwise_tukeyhsd`
+- **Tukey HSD q_crit / p-value / CI precision** -  statsmodels' `pairwise_tukeyhsd`
   looks up the studentized range distribution in an interpolated table
   (`libqsturng`, ~`1e-3` accurate); inferust computes it directly via nested
   Gauss-Legendre quadrature (~`1e-9` accurate against the true distribution).
   Don't expect tighter-than-`5e-3` parity on these three fields specifically.
   See the doc comment on `hypothesis::tukey` for the full derivation.
-- **Tukey HSD mean_diff sign convention** — statsmodels reports
+- **Tukey HSD mean_diff sign convention** -  statsmodels reports
   `meandiff = mean(later group) - mean(earlier group)` for each pair; inferust
   reports `mean_diff = mean(group_a) - mean(group_b)` where `group_a` is the
   earlier group, i.e. the opposite sign. The parity test negates inferust's
   value (and flips/swaps the CI bounds) before comparing; this is a labeling
   convention, not a numerical discrepancy.
-- **Ridge / Lasso / ElasticNet intercept penalty** — statsmodels'
+- **Ridge / Lasso / ElasticNet intercept penalty** -  statsmodels'
   `OLS.fit_regularized(alpha=<scalar>)` penalizes every column including any
   constant; inferust never penalizes the intercept (the scikit-learn/glmnet
   convention). The fixtures pass statsmodels a per-column alpha *vector* with
-  `0` in the intercept's slot to reproduce inferust's objective exactly — see
+  `0` in the intercept's slot to reproduce inferust's objective exactly -  see
   `src/regression/regularized.rs` module docs. Verified offline to agree with
   inferust's coordinate-descent / closed-form solver to ~`1e-13` once that
   adjustment is made, so the parity tolerances above are tight.
@@ -155,14 +155,14 @@ These differences are documented intentionally rather than treated as bugs:
 Modules with no parity fixtures today. Priority is **bold** for high-traffic
 estimators.
 
-- **`glm_family`** — generic GLM front-end; should be matched against
+- **`glm_family`** -  generic GLM front-end; should be matched against
   `statsmodels.GLM` for Gaussian/Binomial/Poisson/Gamma families. (`glm::Gamma`
-  itself has a direct parity fixture — `gamma_glm` — this entry is just about
+  itself has a direct parity fixture -  `gamma_glm` -  this entry is just about
   auditing the generic dispatch wrapper.)
-- **`discrete`** — Probit, ordered logit, negative binomial, multinomial logit, zero-inflated Poisson; each maps to a `statsmodels.discrete` class.
-- **`time_series::Var` / `Sarima` / `Sarimax` / `Vecm` / `Varmax`** — large surface, lowest-priority numerical parity because of multiple optimiser choices.
-- **`multivariate`** — MANOVA, PCA; PCA in particular against `statsmodels.multivariate.pca.PCA`.
-- **`gam`, `gee`, `gmm`, `mixed`, `robust`, `imputation`, `treatment`** — lower priority; each needs a dedicated fixture.
+- **`discrete`** -  Probit, ordered logit, negative binomial, multinomial logit, zero-inflated Poisson; each maps to a `statsmodels.discrete` class.
+- **`time_series::Var` / `Sarima` / `Sarimax` / `Vecm` / `Varmax`** -  large surface, lowest-priority numerical parity because of multiple optimiser choices.
+- **`multivariate`** -  MANOVA, PCA; PCA in particular against `statsmodels.multivariate.pca.PCA`.
+- **`gam`, `gee`, `gmm`, `mixed`, `robust`, `imputation`, `treatment`** -  lower priority; each needs a dedicated fixture.
 
 ## Process for adding a new estimator to the audit
 

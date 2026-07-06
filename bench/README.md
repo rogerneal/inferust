@@ -6,10 +6,10 @@ on deterministic synthetic data (10,000 rows by default).
 ## Quick start
 
 ```bash
-# Rust — full estimator suite
+# Rust -  full estimator suite
 cargo run --release --example bench_all
 
-# Rust — OLS only (configurable rows/features/solver)
+# Rust -  OLS only (configurable rows/features/solver)
 cargo run --release --example bench_ols -- --rows 10000 --features 8 --repeats 10
 
 # Python counterpart (requires numpy, scipy, statsmodels, lifelines, pandas)

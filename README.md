@@ -5,9 +5,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/rogerneal/inferust/ci.yml?branch=master)](https://github.com/rogerneal/inferust/actions)
 
-**Statistical modeling for Rust** — a `statsmodels`-inspired library.
+**Statistical modeling for Rust** -  a `statsmodels`-inspired library.
 
-`inferust` fills the gap between Python's `statsmodels` / `scipy.stats` and the Rust ecosystem. It gives you regression summaries, hypothesis tests, descriptive stats, and correlation matrices with the same depth of output you'd expect from Python — p-values, confidence intervals, AIC/BIC, significance stars, and all.
+`inferust` fills the gap between Python's `statsmodels` / `scipy.stats` and the Rust ecosystem. It gives you regression summaries, hypothesis tests, descriptive stats, and correlation matrices with the same depth of output you'd expect from Python -  p-values, confidence intervals, AIC/BIC, significance stars, and all.
 
 ---
 
@@ -320,7 +320,7 @@ let elastic_net = ElasticNet::new(0.2, 0.5).fit(&x, &y).unwrap(); // l1_ratio = 
 elastic_net.print_summary();
 ```
 
-Ridge is solved in closed form; Lasso and ElasticNet use cyclical coordinate descent with soft-thresholding. None of the three penalize the intercept (the scikit-learn/glmnet convention) — see the `regression::regularized` module docs for the exact objective and how to reproduce it in `statsmodels.OLS().fit_regularized()`.
+Ridge is solved in closed form; Lasso and ElasticNet use cyclical coordinate descent with soft-thresholding. None of the three penalize the intercept (the scikit-learn/glmnet convention) -  see the `regression::regularized` module docs for the exact objective and how to reproduce it in `statsmodels.OLS().fit_regularized()`.
 
 ### Hypothesis tests
 
@@ -447,7 +447,7 @@ For tougher or poorly conditioned designs, call `.stable()` or `.with_solver(Ols
 
 ## Changelog
 
-- **v0.1.17** — IRLS performance pass (Cox PH, Probit, Gamma, ZIP EM), PACF methods,
+- **v0.1.17** -  IRLS performance pass (Cox PH, Probit, Gamma, ZIP EM), PACF methods,
   discrete/GEE/mixed/robust parity fixtures, full benchmark suite.
 
 ---
@@ -517,7 +517,7 @@ match result {
 
 | Crate | Purpose |
 |-------|---------|
-| [`nalgebra`](https://crates.io/crates/nalgebra) | Matrix operations for OLS normal equations — no LAPACK required |
+| [`nalgebra`](https://crates.io/crates/nalgebra) | Matrix operations for OLS normal equations -  no LAPACK required |
 | [`statrs`](https://crates.io/crates/statrs) | Student's t, F, and χ² distributions for p-values and confidence intervals |
 | [`thiserror`](https://crates.io/crates/thiserror) | Ergonomic error types |
 
@@ -534,10 +534,10 @@ match result {
 - [x] Time-series: ARIMA / ACF / PACF
 - [x] Weighted OLS
 
-Contributions welcome — open an issue or PR!
+Contributions welcome -  open an issue or PR!
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT -  see [LICENSE](LICENSE).

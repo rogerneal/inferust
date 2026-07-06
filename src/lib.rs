@@ -1,6 +1,6 @@
 //! # inferust
 //!
-//! **Statistical modeling for Rust** — a `statsmodels`-inspired library.
+//! **Statistical modeling for Rust** - a `statsmodels`-inspired library.
 //!
 //! ## Modules
 //!
@@ -40,13 +40,13 @@
 //! ## Formula syntax
 //!
 //! [`data::DataFrame`] accepts R-style formulas:
-//! - `"y ~ x1 + x2"`            — main effects
-//! - `"y ~ x1 + x2 - 1"`        — no intercept
-//! - `"y ~ C(group) + x1"`      — inline one-hot encoding
-//! - `"y ~ x1:x2"`              — interaction term
-//! - `"y ~ x1 * x2"`            — main effects + interaction
-//! - `"y ~ log(x) + sqrt(z)"`   — numeric transforms
-//! - `"y ~ x + offset(exp)"`    — Poisson offset
+//! - `"y ~ x1 + x2"`            -  main effects
+//! - `"y ~ x1 + x2 - 1"`        -  no intercept
+//! - `"y ~ C(group) + x1"`      -  inline one-hot encoding
+//! - `"y ~ x1:x2"`              -  interaction term
+//! - `"y ~ x1 * x2"`            -  main effects + interaction
+//! - `"y ~ log(x) + sqrt(z)"`   -  numeric transforms
+//! - `"y ~ x + offset(exp)"`    -  Poisson offset
 //!
 //! For Rust-native ergonomics, the [`formula!`] macro turns formula-like tokens
 //! into a formula string:

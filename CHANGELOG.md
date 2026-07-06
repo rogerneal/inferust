@@ -6,38 +6,38 @@ All notable changes to `inferust` are documented here. This project follows sema
 
 ### Added
 
-- **Full benchmark suite** — `examples/bench_all.rs`, statsmodels counterpart, Docker images;
+- **Full benchmark suite** -  `examples/bench_all.rs`, statsmodels counterpart, Docker images;
   see `bench/README.md`.
-- **CI smoke benchmark** — `examples/bench_smoke.rs` (OLS, Logistic, Poisson).
-- **Shared IRLS kernel** (`src/irls.rs`) — incremental `X'WX` accumulation reused across GLM/discrete fits.
-- **PACF methods** — `PacfMethod::{Ols, DurbinLevinson, YuleWalker}` and `pacf_ywm()`.
+- **CI smoke benchmark** -  `examples/bench_smoke.rs` (OLS, Logistic, Poisson).
+- **Shared IRLS kernel** (`src/irls.rs`) -  incremental `X'WX` accumulation reused across GLM/discrete fits.
+- **PACF methods** -  `PacfMethod::{Ols, DurbinLevinson, YuleWalker}` and `pacf_ywm()`.
 
 ### Changed
 
-- **Cox PH** — backward risk-set cumulative pass (O(n·p²) per Newton step vs O(n²·p²)).
-- **Probit / NB2 / Gamma / ZIP EM** — avoid per-iteration design-matrix clones; ZIP EM defaults 50 outer / 5 inner IRLS steps.
-- **Robust LM** — quickselect MAD; sandwich meat without n×n diagonal matrices.
-- **Ordered logit** — line search uses LL-only evaluations.
+- **Cox PH** -  backward risk-set cumulative pass (O(n·p²) per Newton step vs O(n²·p²)).
+- **Probit / NB2 / Gamma / ZIP EM** -  avoid per-iteration design-matrix clones; ZIP EM defaults 50 outer / 5 inner IRLS steps.
+- **Robust LM** -  quickselect MAD; sandwich meat without n×n diagonal matrices.
+- **Ordered logit** -  line search uses LL-only evaluations.
 
 ## [0.1.20] - 2026-07-06
 
 ### Added
 
-- **GEE parity** — `gee_poisson` statsmodels fixture and `tests/parity_gee.rs`.
-- **Generic GLM parity** — `tests/parity_glm_family.rs`; `GlmFamily::InverseGaussian`
+- **GEE parity** -  `gee_poisson` statsmodels fixture and `tests/parity_gee.rs`.
+- **Generic GLM parity** -  `tests/parity_glm_family.rs`; `GlmFamily::InverseGaussian`
   dispatch and `GlmResult::coefficients()`.
-- **VAR impulse responses** — `VarResult::impulse_response` with Cholesky identification.
-- **OLS column-major API** — `Ols::fit_column_major` for BLAS-friendly layouts.
-- **Post-estimation trait** — `post_estimation::ModelResult` and
+- **VAR impulse responses** -  `VarResult::impulse_response` with Cholesky identification.
+- **OLS column-major API** -  `Ols::fit_column_major` for BLAS-friendly layouts.
+- **Post-estimation trait** -  `post_estimation::ModelResult` and
   `wald_linear_contrast` across OLS/GLM results.
-- **Polars bridge** — optional `polars` feature with `polars_bridge::from_polars`.
-- **Panel FE** — `panel::PanelOls::fit_entity_fe` and `two_way_cluster_ids` helper.
+- **Polars bridge** -  optional `polars` feature with `polars_bridge::from_polars`.
+- **Panel FE** -  `panel::PanelOls::fit_entity_fe` and `two_way_cluster_ids` helper.
 
 ## [0.1.19] - 2026-07-06
 
 ### Added
 
-- **MixedLM random slopes** — `MixedLinearModel::fit_random_intercept_slope`
+- **MixedLM random slopes** -  `MixedLinearModel::fit_random_intercept_slope`
   estimates group-specific random intercepts and a random slope on one covariate,
   reporting `random_slopes` and `variance_components.var_slope`.
 
@@ -45,19 +45,19 @@ All notable changes to `inferust` are documented here. This project follows sema
 
 ### Added
 
-- **Discrete-choice parity harness** — statsmodels reference fixtures and
+- **Discrete-choice parity harness** -  statsmodels reference fixtures and
   `tests/parity_discrete.rs` for Probit, Negative Binomial, Multinomial Logit,
   Ordered Logit, and Zero-Inflated Poisson.
-- **Formula API for discrete models** — `DataFrame::probit`,
+- **Formula API for discrete models** -  `DataFrame::probit`,
   `negative_binomial`, `multinomial`, `ordered_logit`, and `zip`.
 
 ## [0.1.17] - 2026-07-06
 
 ### Added
 
-- **State-space Kalman filter** (`statespace::LinearGaussianModel`) — multivariate
+- **State-space Kalman filter** (`statespace::LinearGaussianModel`) -  multivariate
   linear-Gaussian filtering with exact Gaussian log-likelihood for ARMA models.
-- **Exact ARIMA MLE** — `Arima::exact_mle()` / `ArimaMethod::ExactMle` fits
+- **Exact ARIMA MLE** -  `Arima::exact_mle()` / `ArimaMethod::ExactMle` fits
   MA components via state-space MLE instead of conditional sum of squares.
   `Sarima::exact_mle()` uses the same engine when seasonal orders are zero.
 
@@ -65,29 +65,29 @@ All notable changes to `inferust` are documented here. This project follows sema
 
 ### Added
 
-- **Discrete choice models — full MLE rewrites** (`src/discrete.rs`):
-  - `Probit` — IRLS with Fisher scoring weights φ²/(Φ(1−Φ)), proper SE/z/p/AIC/BIC/pseudo-R²
-  - `NegativeBinomial` — NB2 alternating IRLS (β) + Newton (overdispersion α); uses `digamma` for score; log-likelihood reported
-  - `MultinomialLogit` — true K-class softmax Newton-Raphson (not one-vs-rest); log-sum-exp stable; full (K-1)p×(K-1)p Hessian
-  - `OrderedLogit` — proportional-odds model; reparameterized cutpoints (log-gap encoding) for ordering constraint; gradient ascent with Armijo backtracking line search; BHHH outer-product covariance
-  - `ZeroInflatedPoisson` — EM algorithm; E-step posterior structural-zero probabilities; M-step weighted IRLS for count and inflation models
+- **Discrete choice models -  full MLE rewrites** (`src/discrete.rs`):
+  - `Probit` -  IRLS with Fisher scoring weights φ²/(Φ(1−Φ)), proper SE/z/p/AIC/BIC/pseudo-R²
+  - `NegativeBinomial` -  NB2 alternating IRLS (β) + Newton (overdispersion α); uses `digamma` for score; log-likelihood reported
+  - `MultinomialLogit` -  true K-class softmax Newton-Raphson (not one-vs-rest); log-sum-exp stable; full (K-1)p×(K-1)p Hessian
+  - `OrderedLogit` -  proportional-odds model; reparameterized cutpoints (log-gap encoding) for ordering constraint; gradient ascent with Armijo backtracking line search; BHHH outer-product covariance
+  - `ZeroInflatedPoisson` -  EM algorithm; E-step posterior structural-zero probabilities; M-step weighted IRLS for count and inflation models
 
 ## [0.1.15] - 2026-06-22
 
 ### Fixed
 
-- **`GammaLink::Identity` IRLS divergence** — linear predictor `eta` is now
+- **`GammaLink::Identity` IRLS divergence** -  linear predictor `eta` is now
   clamped to `1e-8` after each IRLS update, keeping it in the Gamma
   distribution's support and preventing divergence when early iterates go
   negative.
-- **`GEE` working correlation** — replaced the independence-only stub with a
+- **`GEE` working correlation** -  replaced the independence-only stub with a
   full GEE estimator supporting `Independence`, `Exchangeable`, and `AR(1)`
   working correlation structures. Standard errors are now the empirical
   sandwich estimator, valid even when the working correlation is
   mis-specified. Result type changed to `GeeResult` (flat struct) with
   `coefficients`, `robust_std_errors`, `z_statistics`, `p_values`, `rho`,
   and `cluster_count`.
-- **`MixedLinearModel` variance-component estimation** — replaced the
+- **`MixedLinearModel` variance-component estimation** -  replaced the
   group-mean-residual stub with an EM-algorithm REML estimator for
   random-intercept LMMs. Now reports variance components (`var_random`,
   `var_residual`, `icc`), EBLUP random intercepts, GLS-based fixed-effect
@@ -95,30 +95,30 @@ All notable changes to `inferust` are documented here. This project follows sema
   `MixedLinearResult` now carries `coefficients`, `std_errors`,
   `t_statistics`, `p_values`, `variance_components`, `iterations`, and
   `reml_loglik`.
-- **`RobustLinearModel` standard errors** — added sandwich (HC) standard
+- **`RobustLinearModel` standard errors** -  added sandwich (HC) standard
   errors computed from the M-estimator bread (`X'WX`) and meat (`X'ψ²X`).
   `RobustLinearResult` now exposes `robust_std_errors`, `robust_t_statistics`,
   and `robust_p_values` alongside the existing WLS-derived `fit.std_errors`.
-- **`docs/parity.md`** — removed stale GLS "bse/t/p excluded" note (that
+- **`docs/parity.md`** -  removed stale GLS "bse/t/p excluded" note (that
   sigma² bug was fixed in 0.1.14).
 
 ## [0.1.14] - 2026-06-21
 
 ### Added
 
-- **Parity coverage — nonparametric tests**: `ks_one_sample`, `ks_two_sample`,
+- **Parity coverage -  nonparametric tests**: `ks_one_sample`, `ks_two_sample`,
   `kruskal_wallis`, `shapiro_wilk` now have scipy reference fixtures and
   integration tests in `tests/parity_hypothesis.rs`.
-- **Parity coverage — chi-squared goodness-of-fit**: `hypothesis::chisq::goodness_of_fit`
+- **Parity coverage -  chi-squared goodness-of-fit**: `hypothesis::chisq::goodness_of_fit`
   now tested against `scipy.stats.chisquare`.
-- **Parity coverage — survival**: `KaplanMeier` (survival probabilities, n_events,
+- **Parity coverage -  survival**: `KaplanMeier` (survival probabilities, n_events,
   n_censored) and `log_rank_test` (χ² statistic, p-value) now tested against
   `statsmodels.duration.survfunc.SurvfuncRight` and `scipy.stats.logrank` in
   `tests/parity_survival.rs`.
-- **Parity coverage — contingency tables**: `mcnemar` and `odds_ratio_ci` / `table2x2`
+- **Parity coverage -  contingency tables**: `mcnemar` and `odds_ratio_ci` / `table2x2`
   now tested against `statsmodels.stats.contingency_tables.mcnemar` and
   `scipy.stats.contingency.odds_ratio` in `tests/parity_contingency.rs`.
-- **Parity coverage — diagnostics**: `variance_inflation_factors`, `breusch_pagan`,
+- **Parity coverage -  diagnostics**: `variance_inflation_factors`, `breusch_pagan`,
   `white_test`, and `reset_test` now tested against statsmodels equivalents in
   `tests/parity_diagnostics.rs`.
 
@@ -135,48 +135,48 @@ All notable changes to `inferust` are documented here. This project follows sema
 
 ### Added
 
-- **Multiple-testing corrections** — `hypothesis::multicomp::adjust(p_values, alpha, method)`
+- **Multiple-testing corrections** -  `hypothesis::multicomp::adjust(p_values, alpha, method)`
   with `Bonferroni`, `Holm`, `BenjaminiHochberg`, and `BenjaminiYekutieli`,
   matching `statsmodels.stats.multitest.multipletests` exactly.
-- **Tukey HSD post-hoc test** — `hypothesis::tukey::tukey_hsd(groups, names, alpha)`
+- **Tukey HSD post-hoc test** -  `hypothesis::tukey::tukey_hsd(groups, names, alpha)`
   for family-wise-error-rate-controlled pairwise comparisons after ANOVA, with
   the Tukey-Kramer adjustment for unequal group sizes. Matches
   `statsmodels.stats.multicomp.pairwise_tukeyhsd` on mean differences and
   standard errors; the q-critical value, p-values, and confidence intervals
   depend on the studentized range distribution, which inferust computes via
   quadrature (~1e-9 accurate) rather than statsmodels' interpolated table
-  (~1e-3 accurate) — see `docs/parity.md`.
-- **Ridge, Lasso, and ElasticNet regression** — `regression::{Ridge, Lasso,
+  (~1e-3 accurate) -  see `docs/parity.md`.
+- **Ridge, Lasso, and ElasticNet regression** -  `regression::{Ridge, Lasso,
   ElasticNet}` with closed-form ridge and coordinate-descent lasso/elastic
   net (soft-thresholding), following the scikit-learn/glmnet convention of
   never penalizing the intercept.
-- **Gamma GLM** — `glm::Gamma` for positive, right-skewed continuous outcomes
+- **Gamma GLM** -  `glm::Gamma` for positive, right-skewed continuous outcomes
   (costs, durations, claim sizes), with `InversePower` (canonical), `Log`,
   and `Identity` links, IRLS/Fisher-scoring fitting, and the same covariance,
   residual, likelihood-ratio, and prediction-interval helpers as
   `Logistic`/`Poisson`. `glm_family::GlmFamily` gained a `Gamma` variant.
-- **Granger causality F-test** — `time_series::granger_causality(y, x, lag)` for
+- **Granger causality F-test** -  `time_series::granger_causality(y, x, lag)` for
   whether lagged values of `x` help predict `y`.
-- **Engle-Granger cointegration test** — `time_series::engle_granger(y, x, lags)`
+- **Engle-Granger cointegration test** -  `time_series::engle_granger(y, x, lags)`
   for two-step residual-based cointegration testing with one regressor.
-- **Wilcoxon signed-rank** and **sign test** — `hypothesis::nonparametric::wilcoxon_signed_rank`
+- **Wilcoxon signed-rank** and **sign test** -  `hypothesis::nonparametric::wilcoxon_signed_rank`
   and `::sign_test` for paired-sample inference; signed-rank handles zero
   differences and ties.
-- **Anderson-Darling** and **Lilliefors** normality tests — added to
+- **Anderson-Darling** and **Lilliefors** normality tests -  added to
   `hypothesis::nonparametric` alongside Shapiro-Wilk. Both estimate mean and
   variance from the sample.
-- **Wald linear-restriction tests** — `hypothesis::wald_linear(beta, cov, R, q, df)`
+- **Wald linear-restriction tests** -  `hypothesis::wald_linear(beta, cov, R, q, df)`
   plus convenience `.wald_test(R, q)` methods on `OlsResult`, `LogisticResult`,
   and `PoissonResult`. Returns both the χ² and finite-sample F forms.
 - `OlsResult.covariance_matrix` is now exposed (was previously available only as
   `std_errors`).
 - Parity fixtures and Rust integration tests for every feature above.
 
-- **statsmodels parity harness** — `scripts/parity_statsmodels.py` generates
+- **statsmodels parity harness** -  `scripts/parity_statsmodels.py` generates
   reference JSON fixtures from `statsmodels` / `scipy.stats` on deterministic
   LCG-built datasets; integration tests under `tests/parity_*.rs` load each
   fixture and compare every output at a per-field tolerance.
-- **Parity audit doc** — `docs/parity.md` defines the parity contract, the
+- **Parity audit doc** -  `docs/parity.md` defines the parity contract, the
   tolerance policy, the per-module status matrix, and the prioritized backlog
   of estimators still needing parity coverage.
 - First-pass parity coverage: OLS (Nonrobust, HC0–HC3), WLS, Logit, Poisson,
@@ -214,14 +214,14 @@ All notable changes to `inferust` are documented here. This project follows sema
 - **Feasible GLS** (`Fgls`) via iterative Cochrane-Orcutt with Prais-Winsten first-observation correction; converges in ≤ 50 iterations, exposes estimated AR(1) autocorrelation ρ.
 
 #### Rolling / Recursive OLS (`regression`)
-- **Rolling OLS** (`RollingOls`) — independent OLS within a sliding window; returns per-window coefficients, standard errors, R², and `.slopes()` helper for a time-path of a single coefficient.
-- **Recursive OLS** (`RecursiveOls`) — Sherman-Morrison rank-1 covariance update; computes recursive residuals, CUSUM path, and Brown-Durbin-Evans (1975) boundaries; `.cusum_reject()` and `.print_cusum()` helpers.
+- **Rolling OLS** (`RollingOls`) -  independent OLS within a sliding window; returns per-window coefficients, standard errors, R², and `.slopes()` helper for a time-path of a single coefficient.
+- **Recursive OLS** (`RecursiveOls`) -  Sherman-Morrison rank-1 covariance update; computes recursive residuals, CUSUM path, and Brown-Durbin-Evans (1975) boundaries; `.cusum_reject()` and `.print_cusum()` helpers.
 
 #### Seasonal Models (`time_series`)
-- **SARIMA(p,d,q)(P,D,Q,s)** — multiplicative seasonal differencing, CSS estimation, Adam optimiser; `SarimaResult::forecast(history, steps)` with correct multi-level undifferencing.
-- **SARIMAX** — exogenous regressors projected out via OLS before SARIMA fit on residuals; exposes `exog_coefficients` alongside the full `SarimaResult`.
-- **VECM** (`Vecm`) — Johansen reduced-rank regression via symmetrized generalized EVP; trace statistics, cointegrating vectors β, adjustment speeds α, short-run matrices Γ, and `print_summary`.
-- **VARMAX** (`Varmax`) — VAR extended with exogenous columns in each equation's OLS regressor matrix; `VarmaxResult::forecast(history, exog_future)`.
+- **SARIMA(p,d,q)(P,D,Q,s)** -  multiplicative seasonal differencing, CSS estimation, Adam optimiser; `SarimaResult::forecast(history, steps)` with correct multi-level undifferencing.
+- **SARIMAX** -  exogenous regressors projected out via OLS before SARIMA fit on residuals; exposes `exog_coefficients` alongside the full `SarimaResult`.
+- **VECM** (`Vecm`) -  Johansen reduced-rank regression via symmetrized generalized EVP; trace statistics, cointegrating vectors β, adjustment speeds α, short-run matrices Γ, and `print_summary`.
+- **VARMAX** (`Varmax`) -  VAR extended with exogenous columns in each equation's OLS regressor matrix; `VarmaxResult::forecast(history, exog_future)`.
 
 #### Plot module (`plot`)
 - New `Plot` builder with `line`, `scatter`, `bar`, `step`, `band`, `hline` series types.
@@ -272,14 +272,14 @@ All notable changes to `inferust` are documented here. This project follows sema
 - **Mann-Whitney U test** with normal approximation and tie correction.
 - **Kruskal-Wallis H test** with tie correction and chi-squared p-value.
 - **Kolmogorov-Smirnov one-sample test** (vs. N(μ,σ)) and **two-sample test** (Marsaglia asymptotic p-value).
-- **Shapiro-Wilk normality test** — Royston (1992) algorithm, valid for n = 3 … 5000.
+- **Shapiro-Wilk normality test** -  Royston (1992) algorithm, valid for n = 3 … 5000.
 
 #### Newey-West HAC Standard Errors (`regression`)
 - `OlsCovariance::Hac { lags }` variant and `.hac(lags)` builder for both `Ols` and `Wls`.
-- Bartlett-kernel HAC sandwich estimator — suitable for autocorrelated residuals in time-series regressions.
+- Bartlett-kernel HAC sandwich estimator -  suitable for autocorrelated residuals in time-series regressions.
 
 #### Formula API improvements (`data`)
-- `FormulaTerm` enum: `Numeric`, `Categorical`, `Interaction`, `Offset` — replacing the prior flat string list.
+- `FormulaTerm` enum: `Numeric`, `Categorical`, `Interaction`, `Offset` -  replacing the prior flat string list.
 - `Formula::parse()` supports: `C(var)` inline one-hot encoding; `x1:x2` interaction; `x1*x2` shorthand (main effects + interaction); `offset(var)` Poisson exposure; `- 1` / `+ 0` no-intercept; duplicate-term deduplication.
 - `DesignMatrices` carries `intercept: bool` and `offset: Option<Vec<f64>>` so downstream models consume them automatically.
 - `DataFrame::poisson()` now threads the offset through to `Poisson::with_offset()` when present.
