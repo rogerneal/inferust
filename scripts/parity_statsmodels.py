@@ -1320,6 +1320,347 @@ def run_cox(seed: int) -> dict[str, Any]:
 # ── orchestration ────────────────────────────────────────────────────────────
 
 
+def _nan_to_none(arr: Any) -> list[Any]:
+    """NaN-safe list conversion (JSON has no NaN literal serde accepts)."""
+    out = []
+    for v in np.asarray(arr, dtype=np.float64).ravel():
+        out.append(None if not math.isfinite(v) else float(v))
+    return out
+
+
+def run_power() -> dict[str, Any]:
+    from statsmodels.stats.power import (
+        FTestAnovaPower,
+        NormalIndPower,
+        TTestIndPower,
+        TTestPower,
+    )
+
+    cases_t1 = [
+        {"effect_size": 0.5, "nobs": 30.0, "alpha": 0.05, "alternative": "two-sided"},
+        {"effect_size": 0.3, "nobs": 80.0, "alpha": 0.05, "alternative": "larger"},
+        {"effect_size": -0.4, "nobs": 50.0, "alpha": 0.10, "alternative": "smaller"},
+    ]
+    for c in cases_t1:
+        c["power"] = float(
+            TTestPower().power(c["effect_size"], c["nobs"], c["alpha"], alternative=c["alternative"])
+        )
+    cases_t2 = [
+        {"effect_size": 0.5, "nobs1": 60.0, "alpha": 0.05, "ratio": 1.0, "alternative": "two-sided"},
+        {"effect_size": 0.35, "nobs1": 90.0, "alpha": 0.05, "ratio": 1.5, "alternative": "larger"},
+    ]
+    for c in cases_t2:
+        c["power"] = float(
+            TTestIndPower().power(
+                c["effect_size"], c["nobs1"], c["alpha"], ratio=c["ratio"], alternative=c["alternative"]
+            )
+        )
+    cases_z = [
+        {"effect_size": 0.3, "nobs1": 100.0, "alpha": 0.05, "ratio": 1.0, "alternative": "two-sided"},
+    ]
+    for c in cases_z:
+        c["power"] = float(
+            NormalIndPower().power(
+                c["effect_size"], c["nobs1"], c["alpha"], ratio=c["ratio"], alternative=c["alternative"]
+            )
+        )
+    cases_f = [
+        {"effect_size": 0.25, "nobs": 120.0, "alpha": 0.05, "k_groups": 4.0},
+        {"effect_size": 0.4, "nobs": 60.0, "alpha": 0.01, "k_groups": 3.0},
+    ]
+    for c in cases_f:
+        c["power"] = float(
+            FTestAnovaPower().power(c["effect_size"], nobs=c["nobs"], alpha=c["alpha"], k_groups=c["k_groups"])
+        )
+    solve_t2 = {
+        "effect_size": 0.4,
+        "power": 0.8,
+        "alpha": 0.05,
+        "ratio": 1.0,
+        "alternative": "two-sided",
+    }
+    solve_t2["nobs1"] = float(
+        TTestIndPower().solve_power(
+            effect_size=solve_t2["effect_size"],
+            power=solve_t2["power"],
+            alpha=solve_t2["alpha"],
+            ratio=solve_t2["ratio"],
+            alternative=solve_t2["alternative"],
+        )
+    )
+    return {
+        "estimator": "statsmodels.stats.power",
+        "ttest_power": cases_t1,
+        "ttest_ind_power": cases_t2,
+        "normal_ind_power": cases_z,
+        "ftest_anova_power": cases_f,
+        "solve_ttest_ind_nobs": solve_t2,
+    }
+
+
+def run_proportion() -> dict[str, Any]:
+    from statsmodels.stats.proportion import (
+        proportion_confint,
+        proportion_effectsize,
+        proportions_ztest,
+    )
+
+    z1, p1 = proportions_ztest(62, 100, value=0.5, alternative="two-sided")
+    z1l, p1l = proportions_ztest(62, 100, value=0.5, alternative="larger")
+    z2, p2 = proportions_ztest([45, 30], [80, 80], alternative="two-sided")
+    confint = {}
+    for method, key in [
+        ("normal", "normal"),
+        ("wilson", "wilson"),
+        ("beta", "clopper_pearson"),
+        ("agresti_coull", "agresti_coull"),
+        ("jeffreys", "jeffreys"),
+    ]:
+        lo, hi = proportion_confint(62, 100, alpha=0.05, method=method)
+        confint[key] = [float(lo), float(hi)]
+    return {
+        "estimator": "statsmodels.stats.proportion",
+        "one_sample": {"count": 62, "nobs": 100, "value": 0.5, "z": float(z1), "p": float(p1)},
+        "one_sample_larger": {"z": float(z1l), "p": float(p1l)},
+        "two_sample": {
+            "counts": [45, 30],
+            "nobs": [80, 80],
+            "z": float(z2),
+            "p": float(p2),
+        },
+        "confint": confint,
+        "effectsize": float(proportion_effectsize(0.6, 0.45)),
+    }
+
+
+def run_anova_twoway(seed: int) -> dict[str, Any]:
+    import pandas as pd
+    from statsmodels.formula.api import ols as smf_ols
+    from statsmodels.stats.anova import anova_lm
+
+    rng = _lcg(seed)
+    levels_a = ["a1", "a2", "a3"]
+    levels_b = ["b1", "b2"]
+    rows = []
+    # Unbalanced factorial: cell counts differ so Type I != Type II.
+    counts = {
+        ("a1", "b1"): 6, ("a1", "b2"): 9, ("a2", "b1"): 8,
+        ("a2", "b2"): 5, ("a3", "b1"): 7, ("a3", "b2"): 10,
+    }
+    effects_a = {"a1": 0.0, "a2": 1.2, "a3": -0.7}
+    effects_b = {"b1": 0.0, "b2": 0.8}
+    inter = {("a2", "b2"): 1.5, ("a3", "b2"): -0.9}
+    for (la, lb), cnt in counts.items():
+        for _ in range(cnt):
+            y = (
+                5.0
+                + effects_a[la]
+                + effects_b[lb]
+                + inter.get((la, lb), 0.0)
+                + rng.standard_normal()
+            )
+            rows.append({"y": y, "a": la, "b": lb})
+    df = pd.DataFrame(rows)
+    fit = smf_ols("y ~ C(a) * C(b)", data=df).fit()
+
+    def table(typ: int) -> dict[str, Any]:
+        tab = anova_lm(fit, typ=typ)
+        out = {}
+        for row_name, key in [("C(a)", "a"), ("C(b)", "b"), ("C(a):C(b)", "ab"), ("Residual", "residual")]:
+            r = tab.loc[row_name]
+            out[key] = {
+                "df": float(r["df"]),
+                "sum_sq": float(r["sum_sq"]),
+                "f": None if not math.isfinite(r.get("F", math.nan)) else float(r["F"]),
+                "p": None if not math.isfinite(r.get("PR(>F)", math.nan)) else float(r["PR(>F)"]),
+            }
+        return out
+
+    return {
+        "estimator": "statsmodels.stats.anova.anova_lm",
+        "dataset": {
+            "y": [float(v) for v in df["y"]],
+            "a": list(df["a"]),
+            "b": list(df["b"]),
+        },
+        "type1": table(1),
+        "type2": table(2),
+    }
+
+
+def _seasonal_series(n: int, period: int, seed: int) -> np.ndarray:
+    rng = _lcg(seed)
+    t = np.arange(n, dtype=np.float64)
+    seasonal = 6.0 * np.sin(2.0 * np.pi * (t % period) / period)
+    noise = np.array([rng.standard_normal() for _ in range(n)])
+    return 30.0 + 0.15 * t + seasonal + 0.8 * noise
+
+
+def run_seasonal_decompose(seed: int) -> dict[str, Any]:
+    from statsmodels.tsa.seasonal import seasonal_decompose as sm_decompose
+
+    period = 12
+    y = _seasonal_series(120, period, seed)
+    add = sm_decompose(y, model="additive", period=period)
+    y_pos = y - y.min() + 5.0
+    mul = sm_decompose(y_pos, model="multiplicative", period=period)
+    return {
+        "estimator": "statsmodels.tsa.seasonal.seasonal_decompose",
+        "dataset": {"y": [float(v) for v in y], "y_positive": [float(v) for v in y_pos]},
+        "period": period,
+        "additive": {
+            "trend": _nan_to_none(add.trend),
+            "seasonal": _nan_to_none(add.seasonal),
+            "resid": _nan_to_none(add.resid),
+        },
+        "multiplicative": {
+            "trend": _nan_to_none(mul.trend),
+            "seasonal": _nan_to_none(mul.seasonal),
+            "resid": _nan_to_none(mul.resid),
+        },
+    }
+
+
+def run_stl(seed: int) -> dict[str, Any]:
+    from statsmodels.tsa.seasonal import STL
+
+    period = 12
+    y = _seasonal_series(144, period, seed)
+    res = STL(y, period=period).fit()
+    robust = STL(y, period=period, robust=True).fit()
+    return {
+        "estimator": "statsmodels.tsa.seasonal.STL",
+        "dataset": {"y": [float(v) for v in y]},
+        "period": period,
+        "seasonal": _to_list(res.seasonal),
+        "trend": _to_list(res.trend),
+        "resid": _to_list(res.resid),
+        "robust_seasonal": _to_list(robust.seasonal),
+        "robust_trend": _to_list(robust.trend),
+    }
+
+
+def run_holt_winters(seed: int) -> dict[str, Any]:
+    from statsmodels.tsa.holtwinters import ExponentialSmoothing, SimpleExpSmoothing
+
+    period = 6
+    y = _seasonal_series(72, period, seed)
+
+    ses = SimpleExpSmoothing(
+        y, initialization_method="known", initial_level=float(y[0])
+    ).fit(smoothing_level=0.35, optimized=False)
+
+    init_level = float(np.mean(y[:period]))
+    init_trend = float((np.mean(y[period : 2 * period]) - np.mean(y[:period])) / period)
+    init_seasonal = [float(v - init_level) for v in y[:period]]
+    hw_fixed = ExponentialSmoothing(
+        y,
+        trend="add",
+        seasonal="add",
+        seasonal_periods=period,
+        initialization_method="known",
+        initial_level=init_level,
+        initial_trend=init_trend,
+        initial_seasonal=init_seasonal,
+    ).fit(
+        smoothing_level=0.4,
+        smoothing_trend=0.2,
+        smoothing_seasonal=0.3,
+        optimized=False,
+    )
+    hw_opt = ExponentialSmoothing(
+        y,
+        trend="add",
+        seasonal="add",
+        seasonal_periods=period,
+        initialization_method="legacy-heuristic",
+    ).fit()
+    return {
+        "estimator": "statsmodels.tsa.holtwinters",
+        "dataset": {"y": [float(v) for v in y]},
+        "period": period,
+        "ses_fixed": {
+            "alpha": 0.35,
+            "initial_level": float(y[0]),
+            "fitted": _to_list(ses.fittedvalues),
+            "sse": float(ses.sse),
+            "forecast": _to_list(ses.forecast(8)),
+        },
+        "hw_fixed": {
+            "alpha": 0.4,
+            "beta": 0.2,
+            "gamma": 0.3,
+            "initial_level": init_level,
+            "initial_trend": init_trend,
+            "initial_seasonal": init_seasonal,
+            "fitted": _to_list(hw_fixed.fittedvalues),
+            "sse": float(hw_fixed.sse),
+            "forecast": _to_list(hw_fixed.forecast(2 * period)),
+        },
+        "hw_optimized_sse": float(hw_opt.sse),
+    }
+
+
+def run_forecast_ci(seed: int) -> dict[str, Any]:
+    from statsmodels.tsa.statespace.sarimax import SARIMAX
+    from statsmodels.tsa.api import VAR as SmVar
+
+    rng = _lcg(seed)
+    n = 200
+    # ARIMA(1,1,1) with known params: filter (no estimation) and read se_mean.
+    eps = np.array([rng.standard_normal() for _ in range(n)])
+    dy = np.empty(n)
+    dy[0] = eps[0]
+    for t in range(1, n):
+        dy[t] = 0.6 * dy[t - 1] + eps[t] + 0.25 * eps[t - 1]
+    y = 50.0 + np.cumsum(dy)
+    arima_params = {"ar": 0.6, "ma": 0.25, "sigma2": 1.2}
+    mod = SARIMAX(y, order=(1, 1, 1), trend=None)
+    res = mod.filter([arima_params["ar"], arima_params["ma"], arima_params["sigma2"]])
+    fc = res.get_forecast(10)
+
+    # Seasonal case with known params.
+    smod = SARIMAX(y, order=(1, 0, 0), seasonal_order=(0, 1, 1, 4), trend=None)
+    sres = smod.filter([0.55, -0.4, 0.9])
+    sfc = sres.get_forecast(12)
+
+    # VAR(2): both sides estimate by OLS, so point forecasts and intervals
+    # should agree tightly.
+    m = 160
+    e1 = np.array([rng.standard_normal() for _ in range(m)])
+    e2 = np.array([rng.standard_normal() for _ in range(m)])
+    y1 = np.zeros(m)
+    y2 = np.zeros(m)
+    for t in range(2, m):
+        y1[t] = 0.5 * y1[t - 1] - 0.2 * y2[t - 2] + e1[t]
+        y2[t] = 0.3 * y2[t - 1] + 0.25 * y1[t - 1] + e2[t]
+    data = np.column_stack([y1, y2])
+    var_res = SmVar(data).fit(2, trend="c")
+    point, lower, upper = var_res.forecast_interval(data[-2:], 8, alpha=0.05)
+
+    return {
+        "estimator": "SARIMAX.filter/get_forecast + VAR.forecast_interval",
+        "dataset": {"y": [float(v) for v in y], "y1": _to_list(y1), "y2": _to_list(y2)},
+        "arima": {
+            "order": [1, 1, 1],
+            "params": arima_params,
+            "se_mean": _to_list(fc.se_mean),
+        },
+        "sarima": {
+            "order": [1, 0, 0],
+            "seasonal_order": [0, 1, 1, 4],
+            "params": {"ar": 0.55, "seasonal_ma": -0.4, "sigma2": 0.9},
+            "se_mean": _to_list(sfc.se_mean),
+        },
+        "var": {
+            "lags": 2,
+            "point": _matrix(point),
+            "lower": _matrix(lower),
+            "upper": _matrix(upper),
+        },
+    }
+
+
 def emit(out_dir: Path, name: str, payload: dict[str, Any]) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / f"{name}.json"
@@ -1426,6 +1767,17 @@ def main() -> None:
     emit(out, "ordered_logit_small", run_ordered_logit(n=200, k=2, seed=47))
     emit(out, "zip_small", run_zip(n=200, k=2, seed=48))
     emit(out, "gee_poisson", run_gee_poisson(n=200, k=2, seed=49))
+
+    # Power analysis, proportions, two-way ANOVA (0.2.0)
+    emit(out, "power", run_power())
+    emit(out, "proportion", run_proportion())
+    emit(out, "anova_twoway", run_anova_twoway(seed=70))
+
+    # Seasonal decomposition, exponential smoothing, forecast intervals (0.2.0)
+    emit(out, "seasonal_decompose", run_seasonal_decompose(seed=71))
+    emit(out, "stl", run_stl(seed=72))
+    emit(out, "holt_winters", run_holt_winters(seed=73))
+    emit(out, "forecast_ci", run_forecast_ci(seed=74))
 
     print(f"\nstatsmodels version: {sm.__version__}")
 

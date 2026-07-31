@@ -20,7 +20,7 @@
 | `regression::Ridge` / `Lasso` / `ElasticNet` | L2/L1/mixed-penalty regularized regression (closed-form ridge, coordinate-descent lasso/elastic net), never penalizing the intercept | `statsmodels.OLS().fit_regularized()`, scikit-learn's `Ridge`/`Lasso`/`ElasticNet` |
 | `hypothesis::ttest` | One-sample, two-sample Welch, paired t-tests with 95% CI | `scipy.stats.ttest_*` |
 | `hypothesis::chisq` / `contingency` | Goodness-of-fit, independence, 2x2 odds/risk ratios, McNemar, and CMH | `scipy.stats.chisquare`, `chi2_contingency`, `statsmodels.stats.contingency_tables` |
-| `hypothesis::anova` | One-way ANOVA table (SS, MS, F, p) | `scipy.stats.f_oneway` |
+| `hypothesis::anova` | One-way ANOVA table (SS, MS, F, p) and two-way factorial ANOVA with interaction, Type I and Type II sums of squares | `scipy.stats.f_oneway`, `statsmodels.stats.anova.anova_lm` |
 | `hypothesis::tukey` | Tukey HSD post-hoc pairwise comparisons (Tukey-Kramer adjusted) | `statsmodels.stats.multicomp.pairwise_tukeyhsd` |
 | `hypothesis::multicomp` | Multiple-testing p-value correction (Bonferroni, Holm, Benjamini-Hochberg, Benjamini-Yekutieli) | `statsmodels.stats.multitest.multipletests` |
 | `descriptive::Summary` | mean, std, variance, min/max, quartiles, skewness, excess kurtosis | `pd.Series.describe()` |
@@ -34,7 +34,11 @@
 | `imputation` | mean imputation and MICE-style chained equations | `statsmodels.imputation.mice` basics |
 | `treatment` | propensity scores, IPW ATE/ATT, and balance diagnostics | `statsmodels.treatment` basics |
 | `statespace` | scalar Kalman filter and local-level state-space smoothing/forecasting | `statsmodels.tsa.statespace` basics |
-| `time_series` | AR, ARIMA, SARIMA/SARIMAX, VAR, VECM, VARMAX starters plus ACF, PACF, Ljung-Box, ADF, and KPSS diagnostics | `statsmodels.tsa` basics |
+| `time_series` | AR, ARIMA, SARIMA/SARIMAX, VAR, VECM, VARMAX starters plus ACF, PACF, Ljung-Box, ADF, and KPSS diagnostics, and forecast standard errors with confidence intervals for ARIMA/SARIMA/VAR | `statsmodels.tsa` basics, `get_forecast().conf_int()`, `VARResults.forecast_interval` |
+| `seasonal` | classical seasonal decomposition (additive and multiplicative centered moving averages) and STL | `statsmodels.tsa.seasonal.seasonal_decompose`, `STL` |
+| `smoothing` | simple exponential smoothing, Holt's linear and damped trend, and Holt-Winters additive/multiplicative seasonality with fitted values, SSE, and forecasts | `statsmodels.tsa.holtwinters` |
+| `power` | power and sample-size solving for one/two-sample t-tests, two-sample z-tests, and one-way ANOVA, plus noncentral t/F/χ² CDFs | `statsmodels.stats.power` |
+| `proportion` | one- and two-sample proportion z-tests, five confidence-interval methods (normal, Wilson, Clopper-Pearson, Agresti-Coull, Jeffreys), and Cohen's h | `statsmodels.stats.proportion` |
 | `graphics` | dependency-light SVG line, scatter, residual, and ACF plots | `statsmodels.graphics` basics |
 | `diagnostics` | VIF, Breusch-Pagan, White, RESET diagnostics | `statsmodels.stats.diagnostic`, `outliers_influence` basics |
 | `evaluation` | regression/classification metrics, bootstrap mean intervals | common model-evaluation workflow |
@@ -533,6 +537,12 @@ match result {
 - [x] Multiple-testing corrections (Bonferroni, Holm, Benjamini-Hochberg/Yekutieli)
 - [x] Time-series: ARIMA / ACF / PACF
 - [x] Weighted OLS
+- [x] Two-way ANOVA with Type I / Type II sums of squares
+- [x] Seasonal decomposition (classical and STL)
+- [x] Exponential smoothing and Holt-Winters
+- [x] Power analysis and sample-size solving
+- [x] Proportion tests and confidence intervals
+- [x] Forecast confidence intervals for ARIMA / SARIMA / VAR
 
 Contributions welcome -  open an issue or PR!
 

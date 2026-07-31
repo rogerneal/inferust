@@ -30,6 +30,13 @@ python3 scripts/parity_statsmodels.py
 This rewrites every JSON file under `tests/fixtures/statsmodels/`. After
 regeneration, run `cargo test --tests parity_*` and resolve any new diffs.
 
+`scripts/stl_reference.py` is a companion development oracle: a direct
+transcription of Cleveland's Fortran STL that agrees with
+`statsmodels.tsa.seasonal.STL` to `~1e-13` when given matching iteration counts.
+It is useful for localizing an STL discrepancy to a specific inner step, which
+is hard to do against the compiled Cython extension. It is not used by the test
+suite.
+
 ## Tolerance policy
 
 | Category | Default tolerance | Rationale |
@@ -50,6 +57,14 @@ regeneration, run `cargo test --tests parity_*` and resolve any new diffs.
 | Lasso / ElasticNet (coordinate descent) params | `1e-5` | Same soft-thresholding algorithm; final-iterate drift between the two convergence tolerances dominates. |
 | Gamma GLM (InversePower / Log links) params, bse | `1e-5` | Same IRLS/Fisher-scoring tier as other GLMs. |
 | Gamma GLM deviance, pearson_chi2, scale, AIC, BIC | `1e-4` | Derived from converged fitted values; compounds the `1e-5` param drift. |
+| Two-way ANOVA df, SS, F, p | `1e-9` to `1e-10` | Closed-form projections onto the same nested designs. |
+| Power (t-test, z-test, ANOVA F) | `1e-9` to `1e-12` | Closed-form critical values with noncentral CDFs by quadrature and Poisson mixture. Requires the polished quantiles described under Known gaps. |
+| Proportion z-tests, normal/Wilson/Agresti-Coull intervals | `1e-12` | Closed form. |
+| Proportion Clopper-Pearson / Jeffreys intervals | `1e-10` | Exact Beta quantiles, polished (see Known gaps). |
+| Classical `seasonal_decompose` (trend, seasonal, resid) | `1e-10` | Identical centered moving-average filters. |
+| STL (trend, seasonal, resid) | `1e-11`, `1e-9` robust | Independent loess reimplementation; only accumulated rounding differs. The robust fit runs 15 outer reweighting passes, hence the looser tier. |
+| Exponential smoothing / Holt-Winters fitted, SSE, forecasts | `1e-10` | Identical recursions, with one documented horizon exception (see Known gaps). |
+| ARIMA / VAR forecast standard errors and intervals | `1e-9` to `1e-10` | Analytic ψ-weights vs statsmodels' Kalman filter; the seasonal-difference state converges to about `1e-10`. |
 
 ## Audit matrix
 
@@ -106,6 +121,13 @@ modules that have at least one parity fixture today; modules listed under
 | `regression` | `rolling_ols` | `RollingOls` | params matrix (tol 1e-8), R² vector (tol 1e-8) | passing |
 | `regression` | `recursive_ols` | `RecursiveOls` | params at indices 10/20/30 (tol 1e-2 -  Kalman vs OLS-init convention gap), cusum finiteness | passing |
 | `glm` | `gamma_glm` | `Gamma` (InversePower & Log links) | params, bse, llf, llnull, deviance, pearson_chi2, scale, AIC, BIC, fitted mean CI | pending first run |
+| `hypothesis::anova` | `anova_twoway` | `two_way` (Type I and Type II) | df, sum_sq, F, p per effect plus residual df/SS | passing |
+| `power` | `power` | `TTestPower`, `TTestIndPower`, `NormalIndPower`, `FTestAnovaPower`, `solve_nobs` | power across alternatives and ratios, solved `nobs1` | passing |
+| `proportion` | `proportion` | `proportions_ztest`, `proportion_confint`, `proportion_effectsize` | one/two-sample z and p, five interval methods, Cohen's h | passing |
+| `seasonal` | `seasonal_decompose` | `seasonal_decompose` (additive & multiplicative) | trend, seasonal, resid including NaN edges | passing |
+| `seasonal` | `stl` | `Stl` (default & robust) | trend, seasonal, resid, plus the component-sum identity | passing |
+| `smoothing` | `holt_winters` | `SimpleExpSmoothing`, `ExponentialSmoothing` (add trend + add seasonal) | fitted, SSE, forecasts except `h % period == 0` | passing |
+| `time_series` | `forecast_ci` | `sarima_forecast_standard_errors`, `VarResult::forecast_with_ci` | ARIMA & SARIMA `se_mean`, VAR point/lower/upper | passing |
 
 ## Known gaps
 
@@ -144,6 +166,42 @@ These differences are documented intentionally rather than treated as bugs:
   `src/regression/regularized.rs` module docs. Verified offline to agree with
   inferust's coordinate-descent / closed-form solver to ~`1e-13` once that
   adjustment is made, so the parity tolerances above are tight.
+- **Holt-Winters forecast at the end of a seasonal cycle** -  when
+  `h % period == 0`, statsmodels reuses the previous cycle's seasonal state for
+  that phase instead of the one updated by the final observation. inferust
+  continues the recursion, which is the standard Holt-Winters definition.
+
+  This is a defect in statsmodels rather than a modelling choice. In
+  `statsmodels/tsa/holtwinters/model.py`, `_predict` runs the seasonal update
+  `s[i + m - 1] = ...` for `i` in `1..=nobs`, so `s[nobs + m - 1]` holds the
+  state implied by the last observation. The next statement then extends the
+  array cyclically starting one slot too early:
+
+  ```python
+  s[nobs + m - 1 :] = [s[(nobs - 1) + j % m] for j in range(h + 1 + 1)]
+  ```
+
+  Because the slice starts at `nobs + m - 1` rather than `nobs + m`, the state
+  just computed from the final observation is overwritten with `s[nobs - 1]`,
+  which was written one full cycle earlier. Forecast step `h` reads
+  `s[nobs + h - 1]`, so every horizon except `h % period == 0` is unaffected.
+
+  Confirmed independently with a `gamma = 1` frozen-level series, where the
+  seasonal state is exactly `y_t - level`: for `n = 24`, `period = 4`,
+  statsmodels' forecasts imply seasonal states `s20, s21, s22, s19` across
+  `h = 1..4`, where the correct continuation is `s20, s21, s22, s23`. The parity
+  test skips those horizons and
+  `holt_winters_cycle_end_uses_latest_seasonal_state` pins the intended
+  behaviour. Every other horizon matches at `1e-10`.
+- **statrs coarse quantiles** -  `FisherSnedecor::inverse_cdf`,
+  `ChiSquared::inverse_cdf`, and `Beta::inverse_cdf` terminate a bisection at
+  roughly `1e-5` absolute (the returned values are dyadic rationals), while the
+  corresponding `cdf`/`pdf` are accurate to near machine precision. Taking the
+  quantiles at face value cost about `5e-6` in ANOVA power and `2.6e-5` in
+  Clopper-Pearson bounds. `power::refine_upper_quantile` and
+  `proportion::refine_beta_quantile` polish the estimate with Newton steps on
+  the CDF, which restores full precision. Any new code needing an F, chi-square,
+  or Beta quantile should do the same.
 
 
 ## Future work (backlog)

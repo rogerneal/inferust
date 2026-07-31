@@ -1,6 +1,6 @@
 [package]
 name = "inferust"
-version = "0.1.22"
+version = "0.2.0"
 edition = "2021"
 description = "Statistical modeling for Rust - OLS/WLS regression, GLM, survival analysis, ARIMA/VAR, nonparametric tests, and more. A statsmodels-style library."
 license = "MIT"
@@ -48,6 +48,10 @@ path = "examples/bench_all.rs"
 [[example]]
 name = "bench_smoke"
 path = "examples/bench_smoke.rs"
+
+[[example]]
+name = "case_studies"
+path = "examples/case_studies.rs"
 
 [[test]]
 name = "parity_discrete"

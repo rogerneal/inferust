@@ -2,6 +2,56 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.2.0] - 2026-07-30
+
+### Added
+
+- **Power analysis** (`power`) - `TTestPower`, `TTestIndPower`, `NormalIndPower`, and
+  `FTestAnovaPower` with achieved-power and sample-size solving, plus noncentral t, F,
+  and chi-square CDFs. Mirrors `statsmodels.stats.power`.
+- **Proportion inference** (`proportion`) - one- and two-sample z-tests, five
+  confidence-interval methods (normal, Wilson, Clopper-Pearson, Agresti-Coull,
+  Jeffreys), and Cohen's h effect size. Mirrors `statsmodels.stats.proportion`.
+- **Seasonal decomposition** (`seasonal`) - classical additive and multiplicative
+  decomposition via centered moving averages, and `Stl` with optional robustness
+  iterations. Mirrors `statsmodels.tsa.seasonal`.
+- **Exponential smoothing** (`smoothing`) - `SimpleExpSmoothing`, `Holt` with optional
+  damped trend, and `ExponentialSmoothing` with additive or multiplicative seasonality,
+  reporting fitted values, SSE, AIC/BIC, and forecasts. Mirrors
+  `statsmodels.tsa.holtwinters`.
+- **Two-way ANOVA** - `hypothesis::anova::two_way` with interaction and Type I or
+  Type II sums of squares for unbalanced factorial designs.
+- **Forecast intervals** - `sarima_forecast_standard_errors` plus `forecast_with_ci`
+  on `ArimaResult`, `SarimaResult`, and `VarResult`, matching
+  `get_forecast().conf_int()` and `VARResults.forecast_interval`.
+- **Case study example** - `examples/case_studies.rs` walks applied credit-risk,
+  epidemiological, and panel-count workflows end to end.
+- **Parity coverage** - new fixtures and test suites for all of the above:
+  `parity_power`, `parity_proportion`, `parity_seasonal`, `parity_smoothing`, and new
+  cases in `parity_hypothesis` and `parity_timeseries`. The suite grows from 249 to
+  300 tests.
+
+### Fixed
+
+- **Quantile precision** - `statrs`' `FisherSnedecor`, `ChiSquared`, and `Beta`
+  `inverse_cdf` terminate a bisection near `1e-5`, which cost about `5e-6` in ANOVA
+  power and `2.6e-5` in Clopper-Pearson bounds. Both are now polished with Newton
+  steps on the CDF, bringing ANOVA power to `1e-9` and the exact proportion intervals
+  to `1e-10` against statsmodels.
+- **STL iteration defaults** - `Stl` followed Cleveland's original Fortran, which runs
+  2 inner passes (1 when robust). statsmodels' `STL.fit` instead defaults to 5 inner
+  passes (2 when robust), so the two decompositions stopped at different points and
+  agreed only to about three decimal places. Matching statsmodels' counts brings
+  trend, seasonal, and resid to `1e-12` for the default fit and `2e-11` for the
+  robust fit. Both counts remain overridable via `inner_iter` and `outer_iter`.
+
+### Notes
+
+- One divergence from statsmodels is documented in `docs/parity.md`: Holt-Winters
+  forecasts differ at horizons where `h % period == 0`, because statsmodels
+  overwrites the seasonal state derived from the final observation when it extends
+  the state array for forecasting. inferust continues the standard recursion.
+
 ## [0.1.22] - 2026-07-06
 
 ### Changed

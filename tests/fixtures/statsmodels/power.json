@@ -1,0 +1,78 @@
+{
+ "estimator": "statsmodels.stats.power",
+ "ftest_anova_power": [
+  {
+   "alpha": 0.05,
+   "effect_size": 0.25,
+   "k_groups": 4.0,
+   "nobs": 120.0,
+   "power": 0.6065227867477792
+  },
+  {
+   "alpha": 0.01,
+   "effect_size": 0.4,
+   "k_groups": 3.0,
+   "nobs": 60.0,
+   "power": 0.5435963465750053
+  }
+ ],
+ "normal_ind_power": [
+  {
+   "alpha": 0.05,
+   "alternative": "two-sided",
+   "effect_size": 0.3,
+   "nobs1": 100.0,
+   "power": 0.5641160254310036,
+   "ratio": 1.0
+  }
+ ],
+ "solve_ttest_ind_nobs": {
+  "alpha": 0.05,
+  "alternative": "two-sided",
+  "effect_size": 0.4,
+  "nobs1": 99.08032514676708,
+  "power": 0.8,
+  "ratio": 1.0
+ },
+ "ttest_ind_power": [
+  {
+   "alpha": 0.05,
+   "alternative": "two-sided",
+   "effect_size": 0.5,
+   "nobs1": 60.0,
+   "power": 0.7752658885125877,
+   "ratio": 1.0
+  },
+  {
+   "alpha": 0.05,
+   "alternative": "larger",
+   "effect_size": 0.35,
+   "nobs1": 90.0,
+   "power": 0.8210295983405255,
+   "ratio": 1.5
+  }
+ ],
+ "ttest_power": [
+  {
+   "alpha": 0.05,
+   "alternative": "two-sided",
+   "effect_size": 0.5,
+   "nobs": 30.0,
+   "power": 0.75396471574379
+  },
+  {
+   "alpha": 0.05,
+   "alternative": "larger",
+   "effect_size": 0.3,
+   "nobs": 80.0,
+   "power": 0.8450266477461003
+  },
+  {
+   "alpha": 0.1,
+   "alternative": "smaller",
+   "effect_size": -0.4,
+   "nobs": 50.0,
+   "power": 0.936111853507855
+  }
+ ]
+}

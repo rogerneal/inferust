@@ -241,7 +241,7 @@ pub struct RecursiveOlsResult {
     pub recursive_residuals: Vec<f64>,
     /// CUSUM statistic path W_t = Σ w_s / σ̂.
     pub cusum: Vec<f64>,
-    /// 5 % significance boundaries at each time step: ±boundary[t].
+    /// 5 % significance boundaries at each time step: `±boundary[t]`.
     pub cusum_boundary: Vec<f64>,
     /// Estimated residual standard deviation.
     pub sigma: f64,

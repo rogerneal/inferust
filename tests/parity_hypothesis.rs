@@ -207,6 +207,81 @@ fn parity_anova_oneway() {
     );
 }
 
+/// Two-way ANOVA against `statsmodels.stats.anova.anova_lm` on an unbalanced
+/// factorial design, where Type I and Type II sums of squares differ.
+fn check_two_way(fx: &serde_json::Value, key: &str, ss_type: anova::SsType) {
+    let y = as_f64_vec(&fx["dataset"]["y"]);
+    let a: Vec<&str> = fx["dataset"]["a"]
+        .as_array()
+        .expect("factor a array")
+        .iter()
+        .map(|v| v.as_str().expect("factor level string"))
+        .collect();
+    let b: Vec<&str> = fx["dataset"]["b"]
+        .as_array()
+        .expect("factor b array")
+        .iter()
+        .map(|v| v.as_str().expect("factor level string"))
+        .collect();
+    let result = anova::two_way(&y, &a, &b, ss_type).expect("two-way ANOVA failed");
+    let expected = &fx[key];
+
+    let mut checks = Vec::new();
+    for (row, want_key) in result.rows.iter().zip(["a", "b", "ab"]) {
+        let want = &expected[want_key];
+        checks.push(check_scalar(
+            &format!("{want_key}.df"),
+            row.df,
+            as_f64(&want["df"]),
+            1e-10,
+        ));
+        checks.push(check_scalar(
+            &format!("{want_key}.sum_sq"),
+            row.sum_sq,
+            as_f64(&want["sum_sq"]),
+            1e-9,
+        ));
+        checks.push(check_scalar(
+            &format!("{want_key}.f"),
+            row.f_statistic,
+            as_f64(&want["f"]),
+            1e-9,
+        ));
+        checks.push(check_scalar(
+            &format!("{want_key}.p"),
+            row.p_value,
+            as_f64(&want["p"]),
+            1e-9,
+        ));
+    }
+    let residual = &expected["residual"];
+    checks.push(check_scalar(
+        "residual.df",
+        result.residual_df,
+        as_f64(&residual["df"]),
+        1e-10,
+    ));
+    checks.push(check_scalar(
+        "residual.sum_sq",
+        result.residual_ss,
+        as_f64(&residual["sum_sq"]),
+        1e-9,
+    ));
+    assert_parity(&format!("anova_twoway_{key}"), checks);
+}
+
+#[test]
+fn parity_anova_twoway_type1() {
+    let fx = load_fixture("anova_twoway");
+    check_two_way(&fx, "type1", anova::SsType::TypeI);
+}
+
+#[test]
+fn parity_anova_twoway_type2() {
+    let fx = load_fixture("anova_twoway");
+    check_two_way(&fx, "type2", anova::SsType::TypeII);
+}
+
 #[test]
 fn parity_mann_whitney() {
     let fx = load_fixture("mann_whitney");

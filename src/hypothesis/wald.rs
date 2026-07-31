@@ -55,7 +55,7 @@ impl WaldTestResult {
 }
 
 /// Run a Wald test of `R·β = q` given an estimated coefficient vector `beta`,
-/// its covariance matrix `cov` (k × k, row-major Vec<Vec<f64>>), the
+/// its covariance matrix `cov` (k × k, row-major `Vec<Vec<f64>>`), the
 /// restrictions matrix `r` (r_rows × k), and the target vector `q` (length r).
 ///
 /// Pass `df_resid = Some(df)` for finite-sample OLS to report the F-statistic

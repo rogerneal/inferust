@@ -293,7 +293,12 @@ fn range_cdf(x: f64, k: f64) -> f64 {
 /// panels of the 16-point rule. The integrands here (Gaussian densities and
 /// CDFs) are smooth and analytic with no singularities, so this converges
 /// geometrically with panel count.
-fn gauss_legendre_composite<F: Fn(f64) -> f64>(a: f64, b: f64, segments: usize, f: F) -> f64 {
+pub(crate) fn gauss_legendre_composite<F: Fn(f64) -> f64>(
+    a: f64,
+    b: f64,
+    segments: usize,
+    f: F,
+) -> f64 {
     let panel_width = (b - a) / segments as f64;
     let mut total = 0.0;
     for s in 0..segments {

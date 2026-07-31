@@ -8,7 +8,9 @@
 
 mod common;
 
-use common::{as_f64, as_f64_vec, assert_parity, check_scalar, check_vec, load_fixture};
+use common::{
+    as_f64, as_f64_matrix, as_f64_vec, assert_parity, check_scalar, check_vec, load_fixture,
+};
 use inferust::time_series;
 
 #[test]
@@ -154,4 +156,123 @@ fn parity_arima_plausibility() {
         implied_sm_mean,
         mean_diff
     );
+}
+
+// ── Forecast standard errors and intervals ────────────────────────────────────
+
+/// ARIMA(1,1,1) forecast standard errors against `SARIMAX.get_forecast`.
+///
+/// The fixture uses `SARIMAX.filter` with fixed parameters rather than an MLE
+/// fit, so both sides evaluate the same ψ-weights and the comparison isolates
+/// the variance recursion from estimation differences.
+#[test]
+fn parity_arima_forecast_standard_errors() {
+    let fx = load_fixture("forecast_ci");
+    let spec = &fx["arima"];
+    let expected = as_f64_vec(&spec["se_mean"]);
+    let se = time_series::sarima_forecast_standard_errors(
+        &[as_f64(&spec["params"]["ar"])],
+        &[as_f64(&spec["params"]["ma"])],
+        1,
+        &[],
+        &[],
+        0,
+        1,
+        as_f64(&spec["params"]["sigma2"]),
+        expected.len(),
+    )
+    .expect("ARIMA forecast standard errors failed");
+
+    assert_parity(
+        "arima_forecast_se",
+        vec![check_vec("se_mean", &se, &expected, 1e-10)],
+    );
+}
+
+/// SARIMA(1,0,0)(0,1,1,4) forecast standard errors, exercising the seasonal
+/// differencing and seasonal MA terms of the ψ-weight expansion.
+///
+/// Tolerance is one tier looser than the plain ARIMA case: statsmodels derives
+/// `se_mean` from the Kalman filter, whose seasonal-difference state converges
+/// to the analytic ψ-weights only to about 1e-10.
+#[test]
+fn parity_sarima_forecast_standard_errors() {
+    let fx = load_fixture("forecast_ci");
+    let spec = &fx["sarima"];
+    let expected = as_f64_vec(&spec["se_mean"]);
+    let seasonal_order = as_f64_vec(&spec["seasonal_order"]);
+    let se = time_series::sarima_forecast_standard_errors(
+        &[as_f64(&spec["params"]["ar"])],
+        &[],
+        0,
+        &[],
+        &[as_f64(&spec["params"]["seasonal_ma"])],
+        seasonal_order[2] as usize,
+        seasonal_order[3] as usize,
+        as_f64(&spec["params"]["sigma2"]),
+        expected.len(),
+    )
+    .expect("SARIMA forecast standard errors failed");
+
+    assert_parity(
+        "sarima_forecast_se",
+        vec![check_vec("se_mean", &se, &expected, 1e-9)],
+    );
+}
+
+/// VAR(2) point forecasts and 95% intervals against
+/// `VARResults.forecast_interval`. Both sides estimate by OLS, so this should
+/// agree to linear-algebra precision.
+#[test]
+fn parity_var_forecast_interval() {
+    let fx = load_fixture("forecast_ci");
+    let y1 = as_f64_vec(&fx["dataset"]["y1"]);
+    let y2 = as_f64_vec(&fx["dataset"]["y2"]);
+    let spec = &fx["var"];
+    let lags = spec["lags"].as_u64().expect("lags") as usize;
+
+    let series = vec![y1.clone(), y2.clone()];
+    let fit = time_series::Var::new(lags)
+        .fit(&series)
+        .expect("VAR fit failed");
+
+    let history: Vec<Vec<f64>> = series
+        .iter()
+        .map(|s| s[s.len() - lags..].to_vec())
+        .collect();
+    // statsmodels returns (steps, k) matrices; inferust returns one result per
+    // variable, so the reference is read transposed.
+    let point = as_f64_matrix(&spec["point"]);
+    let lower = as_f64_matrix(&spec["lower"]);
+    let upper = as_f64_matrix(&spec["upper"]);
+    let steps = point.len();
+    let forecasts = fit
+        .forecast_with_ci(&history, steps, 0.05)
+        .expect("VAR forecast_with_ci failed");
+
+    let mut checks = Vec::new();
+    for (var, fc) in forecasts.iter().enumerate() {
+        let want_mean: Vec<f64> = point.iter().map(|row| row[var]).collect();
+        let want_lower: Vec<f64> = lower.iter().map(|row| row[var]).collect();
+        let want_upper: Vec<f64> = upper.iter().map(|row| row[var]).collect();
+        checks.push(check_vec(
+            &format!("mean[{var}]"),
+            &fc.mean,
+            &want_mean,
+            1e-9,
+        ));
+        checks.push(check_vec(
+            &format!("lower[{var}]"),
+            &fc.lower,
+            &want_lower,
+            1e-9,
+        ));
+        checks.push(check_vec(
+            &format!("upper[{var}]"),
+            &fc.upper,
+            &want_upper,
+            1e-9,
+        ));
+    }
+    assert_parity("var_forecast_interval", checks);
 }

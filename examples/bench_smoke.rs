@@ -46,6 +46,8 @@ fn main() {
     });
 }
 
+// black_box wraps the unit return to keep the fit call from being elided.
+#[allow(clippy::unit_arg)]
 fn bench<F: Fn()>(label: &str, f: F) {
     for _ in 0..2 {
         black_box(f());

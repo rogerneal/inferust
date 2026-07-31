@@ -49,7 +49,7 @@ pub fn spearman(x: &[f64], y: &[f64]) -> Result<f64> {
 
 /// Symmetric correlation matrix for k variables (each a `Vec<f64>` of the same length).
 ///
-/// Returns a k×k matrix where entry [i][j] is the Pearson correlation of variable i and j.
+/// Returns a k×k matrix where entry `[i][j]` is the Pearson correlation of variable i and j.
 pub fn correlation_matrix(variables: &[Vec<f64>]) -> Result<Vec<Vec<f64>>> {
     let k = variables.len();
     let mut matrix = vec![vec![0.0f64; k]; k];

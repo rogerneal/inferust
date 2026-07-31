@@ -40,10 +40,7 @@ fn main() {
         .unwrap();
     model.print_summary();
 
-    println!(
-        " Predictions for first 3 obs: {:?}",
-        &model.predict(&x[..3])
-    );
+    println!(" Predictions for first 3 obs: {:?}", model.predict(&x[..3]));
 
     // ── 3. Hypothesis tests ──────────────────────────────────────────────────
     println!("\n╔══════════════════════════════╗");

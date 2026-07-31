@@ -18,6 +18,8 @@ fn millis(d: Duration) -> f64 {
     d.as_secs_f64() * 1_000.0
 }
 
+// black_box wraps the unit return to keep the fit call from being elided.
+#[allow(clippy::unit_arg)]
 fn bench<F: Fn()>(label: &str, rows: usize, repeats: usize, warmups: usize, f: F) {
     for _ in 0..warmups {
         f();
@@ -358,7 +360,9 @@ fn main() {
                 } else {
                     let mu =
                         (r.iter().zip(b.iter()).map(|(xi, bi)| xi * bi).sum::<f64>() + 1.0).exp();
-                    count_y(&[r.clone()], &[1.0], mu.ln(), &mut { lcg(&mut s) as u64 })[0]
+                    count_y(std::slice::from_ref(r), &[1.0], mu.ln(), &mut {
+                        lcg(&mut s) as u64
+                    })[0]
                 }
             })
             .collect();

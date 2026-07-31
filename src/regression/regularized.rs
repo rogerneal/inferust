@@ -579,7 +579,7 @@ mod tests {
         let result = Lasso::new(5.0).fit(&x, &y).unwrap();
         assert!(result.converged);
         // A strong enough penalty should shrink at least one slope to exactly 0.
-        let any_zero = result.coefficients[1..].iter().any(|&c| c == 0.0);
+        let any_zero = result.coefficients[1..].contains(&0.0);
         assert!(
             any_zero,
             "expected at least one zeroed coefficient, got {:?}",

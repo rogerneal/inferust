@@ -21,13 +21,11 @@ def ms(s): return s * 1000.0
 
 def bench(label, fn, rows=N, repeats=20, warmups=3):
     for _ in range(warmups):
-        try: fn()
-        except: pass
+        fn()
     times = []
     for _ in range(repeats):
         t0 = time.perf_counter()
-        try: fn()
-        except: pass
+        fn()
         times.append(time.perf_counter() - t0)
     times.sort()
     print(f"engine=python-statsmodels estimator={label} rows={rows} repeats={repeats} "
@@ -116,7 +114,7 @@ bench("mnlogit", lambda: sm.MNLogit(ym, Xmc).fit(disp=False), repeats=10, warmup
 from statsmodels.miscmodels.ordinal_model import OrderedModel
 Xo = RNG.standard_normal((N,2))
 eta_o = Xo[:,0]*0.8 - Xo[:,1]*0.4 + 0.3*RNG.standard_normal(N)
-yo = pd.Categorical(np.where(eta_o < -0.5, 0, np.where(eta_o < 0.5, 1, 2)))
+yo = np.where(eta_o < -0.5, 0, np.where(eta_o < 0.5, 1, 2)).astype(int)
 bench("ordered_logit", lambda: OrderedModel(yo, Xo, distr='logit').fit(method='bfgs', disp=False), repeats=5, warmups=1)
 
 # ── ZeroInflatedPoisson ──────────────────────────────────────────────────────

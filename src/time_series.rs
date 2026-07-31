@@ -3156,6 +3156,359 @@ impl VarmaxResult {
     }
 }
 
+// ── Forecast confidence intervals ─────────────────────────────────────────────
+
+/// Point forecasts with standard errors and confidence bounds.
+///
+/// Produced by [`ArimaResult::forecast_with_ci`],
+/// [`SarimaResult::forecast_with_ci`], and [`VarResult::forecast_with_ci`];
+/// the analogue of `statsmodels`' `get_forecast(...).conf_int()`.
+#[derive(Debug, Clone)]
+pub struct ForecastResult {
+    /// Point forecasts.
+    pub mean: Vec<f64>,
+    /// Forecast standard errors per horizon.
+    pub se: Vec<f64>,
+    /// Lower confidence bounds.
+    pub lower: Vec<f64>,
+    /// Upper confidence bounds.
+    pub upper: Vec<f64>,
+    /// Significance level used (e.g. 0.05 for 95% intervals).
+    pub alpha: f64,
+}
+
+/// Multiply two polynomials in the lag operator (coefficient convolution).
+/// Both polynomials are stored as `[c0, c1, …]` with `c0` the constant term.
+fn poly_mul(a: &[f64], b: &[f64]) -> Vec<f64> {
+    let mut out = vec![0.0_f64; a.len() + b.len() - 1];
+    for (i, &ai) in a.iter().enumerate() {
+        for (j, &bj) in b.iter().enumerate() {
+            out[i + j] += ai * bj;
+        }
+    }
+    out
+}
+
+/// AR lag polynomial `1 − φ₁B − … − φ_pB^p` at seasonal stride `s`
+/// (`s = 1` gives the non-seasonal polynomial).
+fn ar_polynomial(coeffs: &[f64], s: usize) -> Vec<f64> {
+    let mut poly = vec![0.0_f64; coeffs.len() * s + 1];
+    poly[0] = 1.0;
+    for (i, &c) in coeffs.iter().enumerate() {
+        poly[(i + 1) * s] = -c;
+    }
+    poly
+}
+
+/// MA lag polynomial `1 + θ₁B + … + θ_qB^q` at seasonal stride `s`.
+fn ma_polynomial(coeffs: &[f64], s: usize) -> Vec<f64> {
+    let mut poly = vec![0.0_f64; coeffs.len() * s + 1];
+    poly[0] = 1.0;
+    for (i, &c) in coeffs.iter().enumerate() {
+        poly[(i + 1) * s] = c;
+    }
+    poly
+}
+
+/// Differencing polynomial `(1 − B^s)^d`.
+fn diff_polynomial(d: usize, s: usize) -> Vec<f64> {
+    let mut poly = vec![1.0_f64];
+    let mut factor = vec![0.0_f64; s + 1];
+    factor[0] = 1.0;
+    factor[s] = -1.0;
+    for _ in 0..d {
+        poly = poly_mul(&poly, &factor);
+    }
+    poly
+}
+
+/// ψ-weights of the (possibly nonstationary) ARMA representation
+/// `a(B)·y = c(B)·ε`: ψ₀ = 1, ψ_j = c_j − Σ_{i≥1} a_i·ψ_{j−i}.
+fn psi_weights(ar_full: &[f64], ma_full: &[f64], steps: usize) -> Vec<f64> {
+    let mut psi = vec![0.0_f64; steps];
+    if steps == 0 {
+        return psi;
+    }
+    psi[0] = 1.0;
+    for j in 1..steps {
+        let mut value = if j < ma_full.len() { ma_full[j] } else { 0.0 };
+        for i in 1..ar_full.len().min(j + 1) {
+            value -= ar_full[i] * psi[j - i];
+        }
+        psi[j] = value;
+    }
+    psi
+}
+
+/// Standard errors √(σ²·Σ_{j<h} ψ_j²) for horizons 1..=steps.
+fn forecast_standard_errors(psi: &[f64], sigma2: f64, steps: usize) -> Vec<f64> {
+    let mut cum = 0.0_f64;
+    let mut se = Vec::with_capacity(steps);
+    for &p in psi.iter().take(steps) {
+        cum += p * p;
+        se.push((sigma2 * cum).max(0.0).sqrt());
+    }
+    se
+}
+
+/// Forecast standard errors for a SARIMA(p,d,q)(P,D,Q,s) process with
+/// *known* parameters, for horizons `1..=steps`.
+///
+/// This exposes the ψ-weight machinery behind
+/// [`ArimaResult::forecast_with_ci`] / [`SarimaResult::forecast_with_ci`] for
+/// use with externally estimated parameters; it matches
+/// `statsmodels SARIMAX(...).filter(params).get_forecast(steps).se_mean`.
+/// Pass `s = 1` (and empty seasonal slices, `ds = 0`) for plain ARIMA.
+#[allow(clippy::too_many_arguments)]
+pub fn sarima_forecast_standard_errors(
+    ar: &[f64],
+    ma: &[f64],
+    d: usize,
+    seasonal_ar: &[f64],
+    seasonal_ma: &[f64],
+    ds: usize,
+    s: usize,
+    sigma2: f64,
+    steps: usize,
+) -> Result<Vec<f64>> {
+    if s == 0 || (s == 1 && (ds > 0 || !seasonal_ar.is_empty() || !seasonal_ma.is_empty())) {
+        return Err(InferustError::InvalidInput(
+            "seasonal terms require a seasonal period s >= 2".into(),
+        ));
+    }
+    let stride = s.max(1);
+    let mut ar_full = poly_mul(&ar_polynomial(ar, 1), &ar_polynomial(seasonal_ar, stride));
+    ar_full = poly_mul(&ar_full, &diff_polynomial(d, 1));
+    ar_full = poly_mul(&ar_full, &diff_polynomial(ds, stride));
+    let ma_full = poly_mul(&ma_polynomial(ma, 1), &ma_polynomial(seasonal_ma, stride));
+    let psi = psi_weights(&ar_full, &ma_full, steps);
+    Ok(forecast_standard_errors(&psi, sigma2, steps))
+}
+
+fn interval_bounds(mean: &[f64], se: &[f64], alpha: f64) -> Result<(Vec<f64>, Vec<f64>, f64)> {
+    if !(alpha > 0.0 && alpha < 1.0) {
+        return Err(InferustError::InvalidInput(
+            "alpha must be in (0, 1)".into(),
+        ));
+    }
+    let z = Normal::new(0.0, 1.0)
+        .expect("standard normal")
+        .inverse_cdf(1.0 - alpha / 2.0);
+    let lower = mean.iter().zip(se.iter()).map(|(m, s)| m - z * s).collect();
+    let upper = mean.iter().zip(se.iter()).map(|(m, s)| m + z * s).collect();
+    Ok((lower, upper, z))
+}
+
+impl ArimaResult {
+    /// Forecast with standard errors and `1 − alpha` confidence intervals on
+    /// the original (un-differenced) scale.
+    ///
+    /// Forecast variance uses the ψ-weights of the full nonstationary
+    /// polynomial `φ(B)(1 − B)^d`, matching
+    /// `statsmodels ARIMA(...).get_forecast(steps).conf_int(alpha)` for the
+    /// same parameter values.
+    pub fn forecast_with_ci(
+        &self,
+        history: &[f64],
+        steps: usize,
+        alpha: f64,
+    ) -> Result<ForecastResult> {
+        let mean = self.forecast(history, steps)?;
+        let ar_full = poly_mul(
+            &ar_polynomial(&self.ar_coefficients, 1),
+            &diff_polynomial(self.d, 1),
+        );
+        let ma_full = ma_polynomial(&self.ma_coefficients, 1);
+        let psi = psi_weights(&ar_full, &ma_full, steps);
+        let se = forecast_standard_errors(&psi, self.sigma2, steps);
+        let (lower, upper, _) = interval_bounds(&mean, &se, alpha)?;
+        Ok(ForecastResult {
+            mean,
+            se,
+            lower,
+            upper,
+            alpha,
+        })
+    }
+}
+
+impl SarimaResult {
+    /// Forecast with standard errors and `1 − alpha` confidence intervals on
+    /// the original scale.
+    ///
+    /// The ψ-weights come from the product polynomials
+    /// `φ(B)·Φ(B^s)·(1 − B)^d·(1 − B^s)^D` and `θ(B)·Θ(B^s)`.
+    pub fn forecast_with_ci(
+        &self,
+        history: &[f64],
+        steps: usize,
+        alpha: f64,
+    ) -> Result<ForecastResult> {
+        let mean = self.forecast(history, steps)?;
+        let mut ar_full = poly_mul(
+            &ar_polynomial(&self.ar_coefficients, 1),
+            &ar_polynomial(&self.seasonal_ar, self.s),
+        );
+        ar_full = poly_mul(&ar_full, &diff_polynomial(self.d, 1));
+        ar_full = poly_mul(&ar_full, &diff_polynomial(self.ds, self.s));
+        let ma_full = poly_mul(
+            &ma_polynomial(&self.ma_coefficients, 1),
+            &ma_polynomial(&self.seasonal_ma, self.s),
+        );
+        let psi = psi_weights(&ar_full, &ma_full, steps);
+        let se = forecast_standard_errors(&psi, self.sigma2, steps);
+        let (lower, upper, _) = interval_bounds(&mean, &se, alpha)?;
+        Ok(ForecastResult {
+            mean,
+            se,
+            lower,
+            upper,
+            alpha,
+        })
+    }
+}
+
+impl VarResult {
+    /// Forecast each variable with standard errors and `1 − alpha`
+    /// confidence intervals.
+    ///
+    /// The forecast MSE accumulates Ψ_i·Σ_u·Ψ_iᵀ over horizons, where Ψ_i is
+    /// the top-left k×k block of the i-th companion-matrix power and Σ_u is
+    /// the df-adjusted residual covariance (denominator `n − k·p − 1`),
+    /// matching `statsmodels VARResults.forecast_interval`.
+    pub fn forecast_with_ci(
+        &self,
+        history: &[Vec<f64>],
+        steps: usize,
+        alpha: f64,
+    ) -> Result<Vec<ForecastResult>> {
+        let means = self.forecast(history, steps)?;
+        let k = self.k;
+        // df-adjusted residual covariance.
+        let df = (self.n as f64 - (k * self.lags + 1) as f64).max(1.0);
+        let mut sigma_u = DMatrix::zeros(k, k);
+        for i in 0..k {
+            for j in 0..k {
+                sigma_u[(i, j)] = (0..self.residuals[i].len())
+                    .map(|t| self.residuals[i][t] * self.residuals[j][t])
+                    .sum::<f64>()
+                    / df;
+            }
+        }
+        let companion = companion_matrix(self);
+        let dim = companion.nrows();
+
+        // Ψ_i = J A^i J' with J = [I_k 0]; accumulate MSE per horizon.
+        let mut a_power = DMatrix::<f64>::identity(dim, dim);
+        let mut mse = DMatrix::<f64>::zeros(k, k);
+        let mut se_per_var: Vec<Vec<f64>> = vec![Vec::with_capacity(steps); k];
+        for _h in 0..steps {
+            let psi_i = a_power.view((0, 0), (k, k)).into_owned();
+            mse += &psi_i * &sigma_u * psi_i.transpose();
+            for (var, se_vec) in se_per_var.iter_mut().enumerate() {
+                se_vec.push(mse[(var, var)].max(0.0).sqrt());
+            }
+            a_power = &a_power * &companion;
+        }
+
+        let mut out = Vec::with_capacity(k);
+        for (var, mean) in means.into_iter().enumerate() {
+            let se = se_per_var[var].clone();
+            let (lower, upper, _) = interval_bounds(&mean, &se, alpha)?;
+            out.push(ForecastResult {
+                mean,
+                se,
+                lower,
+                upper,
+                alpha,
+            });
+        }
+        Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod forecast_ci_tests {
+    use super::*;
+
+    #[test]
+    fn ar1_psi_weights_match_closed_form() {
+        // For AR(1): psi_j = phi^j, var_h = sigma2 * (1 - phi^(2h)) / (1 - phi^2).
+        let phi = 0.6_f64;
+        let ar_full = ar_polynomial(&[phi], 1);
+        let ma_full = ma_polynomial(&[], 1);
+        let psi = psi_weights(&ar_full, &ma_full, 6);
+        for (j, &p) in psi.iter().enumerate() {
+            assert!(
+                (p - phi.powi(j as i32)).abs() < 1e-12,
+                "psi[{j}] = {p}, expected {}",
+                phi.powi(j as i32)
+            );
+        }
+        let sigma2 = 2.0;
+        let se = forecast_standard_errors(&psi, sigma2, 6);
+        for h in 1..=6 {
+            let expected = (sigma2 * (1.0 - phi.powi(2 * h as i32)) / (1.0 - phi * phi)).sqrt();
+            assert!(
+                (se[h - 1] - expected).abs() < 1e-12,
+                "se[{h}] = {}, expected {expected}",
+                se[h - 1]
+            );
+        }
+    }
+
+    #[test]
+    fn random_walk_variance_grows_linearly() {
+        // ARIMA(0,1,0): psi_j = 1 for all j, so var_h = h * sigma2.
+        let ar_full = diff_polynomial(1, 1);
+        let psi = psi_weights(&ar_full, &[1.0], 5);
+        assert!(psi.iter().all(|&p| (p - 1.0).abs() < 1e-12));
+        let se = forecast_standard_errors(&psi, 1.0, 5);
+        for (h, &s) in se.iter().enumerate() {
+            let expected = ((h + 1) as f64).sqrt();
+            assert!((s - expected).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn arima_forecast_ci_widens() {
+        let y: Vec<f64> = (0..80)
+            .map(|i| 5.0 + 0.3 * i as f64 + ((i * 7) % 11) as f64 * 0.15)
+            .collect();
+        let fit = Arima::new(1, 1, 0).fit(&y).unwrap();
+        let f = fit.forecast_with_ci(&y, 10, 0.05).unwrap();
+        assert_eq!(f.mean.len(), 10);
+        // Standard errors are nondecreasing for an integrated model.
+        for h in 1..10 {
+            assert!(f.se[h] >= f.se[h - 1] - 1e-12);
+        }
+        // Bounds bracket the mean.
+        for h in 0..10 {
+            assert!(f.lower[h] < f.mean[h] && f.mean[h] < f.upper[h]);
+        }
+    }
+
+    #[test]
+    fn var_forecast_ci_brackets_mean() {
+        let n = 60;
+        let y1: Vec<f64> = (0..n)
+            .map(|i| (i as f64 * 0.7).sin() + i as f64 * 0.05)
+            .collect();
+        let y2: Vec<f64> = (0..n).map(|i| (i as f64 * 0.5).cos() * 0.8 + 1.0).collect();
+        let fit = Var::new(2).fit(&[y1.clone(), y2.clone()]).unwrap();
+        let f = fit.forecast_with_ci(&[y1, y2], 8, 0.05).unwrap();
+        assert_eq!(f.len(), 2);
+        for fr in &f {
+            for h in 0..8 {
+                assert!(fr.lower[h] < fr.mean[h] && fr.mean[h] < fr.upper[h]);
+            }
+            for h in 1..8 {
+                assert!(fr.se[h] >= fr.se[h - 1] - 1e-9);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod vecm_varmax_tests {
     use super::{Varmax, Vecm};

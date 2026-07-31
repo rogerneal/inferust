@@ -7,4 +7,6 @@ __pycache__/
 .venv/
 bench/bench_*
 !bench/README.md
+# Benchmark run logs are machine-specific; keep them out of the repo.
+bench/results/
 .vscode/
