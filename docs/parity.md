@@ -74,30 +74,30 @@ modules that have at least one parity fixture today; modules listed under
 
 | Module | Fixture(s) | Estimator | What's compared | Status |
 |---|---|---|---|---|
-| `regression` | `ols_small`, `ols_medium` | `Ols` (Nonrobust) | params, bse, t, p, CI, fitted, resid, R², adj R², F, F-p, AIC, BIC, SSR, ESS, TSS, MSE, hat, Cook's, studentized | pending first run |
-| `regression` | `ols_hc0/1/2/3` | `Ols` w/ HC0–HC3 | params, bse, t, p | pending first run |
-| `regression` | `wls_small` | `Wls` | params, bse, t, p, R², F, SSR | pending first run |
-| `glm` | `logit_small` | `Logistic` | params, bse, z, p, llf, llnull, pseudo R², AIC, BIC | pending first run |
-| `glm` | `poisson_small` | `Poisson` | params, bse, z, p, llf, llnull, AIC, BIC, fitted | pending first run |
-| `time_series` | `acf_pacf` | `acf`, `pacf`, `ljung_box` | full vectors plus per-lag Q stat & p-value | pending first run |
-| `time_series` | `adf` | `adf_test` | t-statistic | pending first run |
+| `regression` | `ols_small`, `ols_medium` | `Ols` (Nonrobust) | params, bse, t, p, CI, fitted, resid, R², adj R², F, F-p, AIC, BIC, SSR, ESS, TSS, MSE, hat, Cook's, studentized | passing |
+| `regression` | `ols_hc0/1/2/3` | `Ols` w/ HC0–HC3 | params, bse, t, p | passing |
+| `regression` | `wls_small` | `Wls` | params, bse, t, p, R², F, SSR | passing |
+| `glm` | `logit_small` | `Logistic` | params, bse, z, p, llf, llnull, pseudo R², AIC, BIC | passing |
+| `glm` | `poisson_small` | `Poisson` | params, bse, z, p, llf, llnull, AIC, BIC, fitted | passing |
+| `time_series` | `acf_pacf` | `acf`, `pacf`, `ljung_box` | full vectors plus per-lag Q stat & p-value | passing |
+| `time_series` | `adf` | `adf_test` | t-statistic | passing |
 | `time_series` | `arima_ar1` | `Arima(1,0,0)` | implied mean & phi within 0.05 / 0.5 | structural-only |
-| `hypothesis` | `ttest_1samp` | `ttest::one_sample` | statistic, p, df, mean_diff, CI | pending first run |
-| `hypothesis` | `ttest_ind` | `ttest::two_sample` (Welch) | statistic, p, df | pending first run |
-| `hypothesis` | `anova_oneway` | `anova::one_way` | F, p | pending first run |
-| `hypothesis` | `mann_whitney` | `nonparametric::mann_whitney` | U (sided), p | pending first run |
-| `hypothesis` | `chi2_independence` | `chisq::independence` | χ², p, df | pending first run |
-| `correlation` | `pearson_spearman` | `pearson`, `spearman` | r | pending first run |
-| `descriptive` | `descriptive` | `Summary` | mean, std, var, quartiles, skew, kurtosis | pending first run |
-| `survival` | `cox_ph` | `CoxPh` (Breslow ties) | params, bse, z, p, llf | pending first run |
+| `hypothesis` | `ttest_1samp` | `ttest::one_sample` | statistic, p, df, mean_diff, CI | passing |
+| `hypothesis` | `ttest_ind` | `ttest::two_sample` (Welch) | statistic, p, df | passing |
+| `hypothesis` | `anova_oneway` | `anova::one_way` | F, p | passing |
+| `hypothesis` | `mann_whitney` | `nonparametric::mann_whitney` | U (sided), p | passing |
+| `hypothesis` | `chi2_independence` | `chisq::independence` | χ², p, df | passing |
+| `correlation` | `pearson_spearman` | `pearson`, `spearman` | r | passing |
+| `descriptive` | `descriptive` | `Summary` | mean, std, var, quartiles, skew, kurtosis | passing |
+| `survival` | `cox_ph` | `CoxPh` (Breslow ties) | params, bse, z, p, llf | passing |
 | `survival` | `kaplan_meier` | `KaplanMeier` | n_events, n_censored, survival at 3 checkpoints (tol 1e-6) | passing |
 | `survival` | `log_rank` | `log_rank_test` | χ² statistic, p (tol 1e-4) | passing |
-| `time_series` | `granger_causality` | `granger_causality` | F, p at lag 2 | pending first run |
-| `time_series` | `engle_granger` | `engle_granger` | second-stage ADF t-stat | pending first run |
-| `hypothesis` | `wilcoxon` | `wilcoxon_signed_rank` | W statistic, asymptotic p | pending first run (p loose) |
-| `hypothesis` | `sign_test` | `sign_test` | counts + exact two-sided binomial p | pending first run |
-| `hypothesis` | `anderson_darling` | `anderson_darling` | raw A² (matches scipy `anderson`) | pending first run |
-| `hypothesis` | `lilliefors` | `lilliefors` | D statistic only (different p-value approx) | pending first run |
+| `time_series` | `granger_causality` | `granger_causality` | F, p at lag 2 | passing |
+| `time_series` | `engle_granger` | `engle_granger` | second-stage ADF t-stat | passing |
+| `hypothesis` | `wilcoxon` | `wilcoxon_signed_rank` | W statistic, asymptotic p | passing (p loose) |
+| `hypothesis` | `sign_test` | `sign_test` | counts + exact two-sided binomial p | passing |
+| `hypothesis` | `anderson_darling` | `anderson_darling` | raw A² (matches scipy `anderson`) | passing |
+| `hypothesis` | `lilliefors` | `lilliefors` | D statistic only (different p-value approx) | passing |
 | `hypothesis` | `ks_one_sample` | `nonparametric::ks_one_sample` | D statistic (1e-6), p-value (3e-2 -  Marsaglia vs scipy expansion) | passing |
 | `hypothesis` | `ks_two_sample` | `nonparametric::ks_two_sample` | D statistic (1e-6), p-value (3e-2 -  Marsaglia vs scipy expansion) | passing |
 | `hypothesis` | `kruskal_wallis_parity` | `nonparametric::kruskal_wallis` | H statistic (1e-6), p (1e-6) | passing |
@@ -109,18 +109,18 @@ modules that have at least one parity fixture today; modules listed under
 | `diagnostics` | `breusch_pagan` | `breusch_pagan` | LM statistic, p (1e-4) | passing |
 | `diagnostics` | `white_test` | `white_test` | LM statistic, p (1e-4) | passing |
 | `diagnostics` | `reset_test` | `reset_test` | F statistic, p (1e-4) | passing |
-| `hypothesis::wald` | `wald_ols` | `OlsResult::wald_test` | χ² & F statistics + both p-values | pending first run |
-| `hypothesis::multicomp` | `multicomp` | `adjust` (Bonferroni, Holm, BH, BY) | p_corrected, reject, alpha_bonferroni, alpha_sidak, for all four methods | pending first run |
-| `hypothesis::tukey` | `tukey_hsd` | `tukey_hsd` | mean_diff (sign-flipped vs. statsmodels' convention), std_error, q_crit, p-value, CI bounds, df_within | pending first run |
-| `regression::regularized` | `ridge_small` | `Ridge` | params (incl. intercept) | pending first run |
-| `regression::regularized` | `lasso_small` | `Lasso` | params (incl. intercept) | pending first run |
-| `regression::regularized` | `elastic_net_small` | `ElasticNet` | params (incl. intercept) | pending first run |
+| `hypothesis::wald` | `wald_ols` | `OlsResult::wald_test` | χ² & F statistics + both p-values | passing |
+| `hypothesis::multicomp` | `multicomp` | `adjust` (Bonferroni, Holm, BH, BY) | p_corrected, reject, alpha_bonferroni, alpha_sidak, for all four methods | passing |
+| `hypothesis::tukey` | `tukey_hsd` | `tukey_hsd` | mean_diff (sign-flipped vs. statsmodels' convention), std_error, q_crit, p-value, CI bounds, df_within | passing |
+| `regression::regularized` | `ridge_small` | `Ridge` | params (incl. intercept) | passing |
+| `regression::regularized` | `lasso_small` | `Lasso` | params (incl. intercept) | passing |
+| `regression::regularized` | `elastic_net_small` | `ElasticNet` | params (incl. intercept) | passing |
 | `regression` | `gls_ar1` | `Gls` (known AR(1) Ω) | params, bse, t, p | passing |
 | `regression` | `fgls_cochrane_orcutt` | `Fgls` (Cochrane-Orcutt / Prais-Winsten) | params, rho (tol 6e-2 -  algorithm gap: inferust uses Prais-Winsten first-obs correction, statsmodels GLSAR uses pure C-O) | passing |
 | `regression` | `quantreg_median`, `quantreg_q25` | `QuantileRegression` | params (tol 1e-4), pseudo_r1 (tol 1e-4) | passing |
 | `regression` | `rolling_ols` | `RollingOls` | params matrix (tol 1e-8), R² vector (tol 1e-8) | passing |
 | `regression` | `recursive_ols` | `RecursiveOls` | params at indices 10/20/30 (tol 1e-2 -  Kalman vs OLS-init convention gap), cusum finiteness | passing |
-| `glm` | `gamma_glm` | `Gamma` (InversePower & Log links) | params, bse, llf, llnull, deviance, pearson_chi2, scale, AIC, BIC, fitted mean CI | pending first run |
+| `glm` | `gamma_glm` | `Gamma` (InversePower & Log links) | params, bse, llf, llnull, deviance, pearson_chi2, scale, AIC, BIC, fitted mean CI | passing |
 | `hypothesis::anova` | `anova_twoway` | `two_way` (Type I and Type II) | df, sum_sq, F, p per effect plus residual df/SS | passing |
 | `power` | `power` | `TTestPower`, `TTestIndPower`, `NormalIndPower`, `FTestAnovaPower`, `solve_nobs` | power across alternatives and ratios, solved `nobs1` | passing |
 | `proportion` | `proportion` | `proportions_ztest`, `proportion_confint`, `proportion_effectsize` | one/two-sample z and p, five interval methods, Cohen's h | passing |
@@ -128,6 +128,15 @@ modules that have at least one parity fixture today; modules listed under
 | `seasonal` | `stl` | `Stl` (default & robust) | trend, seasonal, resid, plus the component-sum identity | passing |
 | `smoothing` | `holt_winters` | `SimpleExpSmoothing`, `ExponentialSmoothing` (add trend + add seasonal) | fitted, SSE, forecasts except `h % period == 0` | passing |
 | `time_series` | `forecast_ci` | `sarima_forecast_standard_errors`, `VarResult::forecast_with_ci` | ARIMA & SARIMA `se_mean`, VAR point/lower/upper | passing |
+| `discrete` | `probit_small` | `Probit` | params, bse, z, p, llf | passing |
+| `discrete` | `negbin_small` | `NegativeBinomial` (NB2) | params, bse, alpha, llf | passing |
+| `discrete` | `multinomial_small` | `MultinomialLogit` | params per non-base outcome, llf | passing |
+| `discrete` | `ordered_logit_small` | `OrderedLogit` | params, thresholds, llf | passing |
+| `discrete` | `zip_small` | `ZeroInflatedPoisson` | count & inflation params, llf | passing |
+| `glm_family` | `ols_small`, `poisson_small` | `Glm` dispatch (Gaussian, Poisson) | params routed through the generic front-end (1e-8 / 1e-5) | passing |
+| `gee` | `gee_poisson` | `Gee` (Poisson, exchangeable) | params, bse | passing |
+| `mixed` | `mixed_small` | `MixedLm` (random intercept) | fixed effects, group variance | passing |
+| `robust` | `robust_small` | `Rlm` (Huber) | params, bse | passing |
 
 ## Known gaps
 
@@ -208,17 +217,25 @@ These differences are documented intentionally rather than treated as bugs:
 
 ## Future work (backlog)
 
-Modules with no parity fixtures today. Priority is **bold** for high-traffic
+Gaps in the audit: modules with no fixture at all, plus estimators whose fixture
+pins only part of the result surface. Priority is **bold** for high-traffic
 estimators.
 
-- **`glm_family`** -  generic GLM front-end; should be matched against
-  `statsmodels.GLM` for Gaussian/Binomial/Poisson/Gamma families. (`glm::Gamma`
-  itself has a direct parity fixture -  `gamma_glm` -  this entry is just about
-  auditing the generic dispatch wrapper.)
-- **`discrete`** -  Probit, ordered logit, negative binomial, multinomial logit, zero-inflated Poisson; each maps to a `statsmodels.discrete` class.
-- **`time_series::Var` / `Sarima` / `Sarimax` / `Vecm` / `Varmax`** -  large surface, lowest-priority numerical parity because of multiple optimiser choices.
-- **`multivariate`** -  MANOVA, PCA; PCA in particular against `statsmodels.multivariate.pca.PCA`.
-- **`gam`, `gee`, `gmm`, `mixed`, `robust`, `imputation`, `treatment`** -  lower priority; each needs a dedicated fixture.
+- **`multivariate`** -  MANOVA and PCA; PCA in particular against
+  `statsmodels.multivariate.pca.PCA`.
+- **`panel`** -  fixed- and random-effects estimators; closest reference is
+  `linearmodels.panel` rather than statsmodels proper.
+- **`gam`, `gmm`, `imputation`, `treatment`** -  each needs a dedicated fixture.
+- **`time_series::Sarimax` / `Vecm` / `Varmax`** -  large surface and
+  lowest-priority numerical parity because of multiple optimiser choices. The
+  ARIMA/SARIMA/VAR forecast paths are already covered by `forecast_ci`, and
+  `Var` itself by `granger_causality`.
+- **Deeper `glm_family` dispatch** -  the `glm_family` row above audits only the
+  Gaussian and Poisson params. Binomial and Gamma dispatch, and the fuller
+  output set (bse, llf, deviance), are still unaudited through the front-end,
+  though the dedicated `Logistic` and `Gamma` estimators are covered directly.
+- **Fuller output sets for `gee`, `mixed`, `robust`** -  each has a fixture
+  pinning the headline coefficients, but not the complete result surface.
 
 ## Process for adding a new estimator to the audit
 

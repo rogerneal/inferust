@@ -32,16 +32,26 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
 
       - name: Check formatting
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
+      # --all-targets covers tests, examples and benches; --all-features covers
+      # the optional polars bridge, which a default-feature lint would skip.
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Build
         run: cargo build --verbose
 
       - name: Run tests
-        run: cargo test --verbose
+        run: cargo test --all-features --verbose
+
+      - name: Check docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --all-features
+
+      - name: Check package builds for crates.io
+        run: cargo package
 
       - name: Run example
         run: cargo run --example basic_ols
@@ -51,3 +61,19 @@ jobs:
 
       - name: Smoke benchmark
         run: cargo run --release --example bench_smoke
+
+  msrv:
+    name: MSRV (1.89)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Default features only: the polars bridge pulls dependencies that
+      # require a newer toolchain than the crate's declared floor.
+      - name: Install Rust 1.89
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.89"
+
+      - name: Check against the declared rust-version
+        run: cargo check --all-targets

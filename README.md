@@ -529,6 +529,20 @@ match result {
 
 ## Roadmap
 
+### Planned
+
+Ordered roughly by priority. The parity gaps are tracked in more detail under
+"Future work" in [docs/parity.md](docs/parity.md).
+
+- [ ] Parity fixtures for `multivariate` (PCA against `statsmodels.multivariate.pca.PCA`, MANOVA)
+- [ ] Parity fixtures for `panel` fixed- and random-effects estimators
+- [ ] Binomial and Gamma dispatch through the generic `glm_family` front-end, plus bse/llf/deviance
+- [ ] Fuller output sets for the `gee`, `mixed`, and `robust` fixtures, which currently pin only headline coefficients
+- [ ] Parity fixtures for `gam`, `gmm`, `imputation`, and `treatment`
+- [ ] Numerical parity for `Sarimax`, `Vecm`, and `Varmax`
+
+### Shipped
+
 - [x] Logistic regression (GLM with logit link)
 - [x] Gamma regression (GLM with InversePower/Log/Identity links)
 - [x] Ridge / Lasso / ElasticNet regularization

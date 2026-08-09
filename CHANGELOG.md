@@ -14,8 +14,26 @@ All notable changes to `inferust` are documented here. This project follows sema
   `simba`. `statrs` 0.19 shares `nalgebra` 0.35, and `cargo tree --duplicates` is now
   empty.
 
+### Added
+
+- **Declared MSRV** - `rust-version = "1.89"`, the floor set by `nalgebra` 0.35 and
+  `statrs` 0.19 and verified with `cargo +1.89 check --all-targets`. A CI job now holds
+  the line so it cannot drift silently. The optional `polars` feature pulls
+  dependencies needing a newer toolchain, so the floor covers the default feature set.
+
 ### Fixed
 
+- **Documentation drift in `docs/parity.md`** - 28 audit-matrix rows still read
+  "pending first run" despite their tests passing, and the backlog listed `glm_family`,
+  `discrete`, `gee`, `mixed`, `robust`, and the `Var`/`Sarima` forecast paths as having
+  no fixtures when each does. Statuses now reflect the suite, nine missing rows were
+  added for the discrete, `glm_family`, `gee`, `mixed`, and `robust` fixtures, and the
+  backlog lists only genuine gaps, including `panel`, which had been omitted entirely.
+- **CI was weaker than the release gate** - it linted only default targets and default
+  features, so tests, examples, and the whole `polars` bridge went unchecked, and there
+  was no rustdoc or packaging step. It now runs `clippy --all-targets --all-features`,
+  `test --all-features`, `cargo doc` with `-D warnings`, and `cargo package`. The polars
+  breakage fixed in this release is exactly the class of failure the old gate missed.
 - **Polars string columns** - `from_polars` no longer relies on `into_no_null_iter`,
   which stopped satisfying its trait bounds for `StringChunked` in polars 0.55. The
   replacement also closes a latent gap: null string entries now raise the same
