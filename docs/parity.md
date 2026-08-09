@@ -193,15 +193,17 @@ These differences are documented intentionally rather than treated as bugs:
   test skips those horizons and
   `holt_winters_cycle_end_uses_latest_seasonal_state` pins the intended
   behaviour. Every other horizon matches at `1e-10`.
-- **statrs coarse quantiles** -  `FisherSnedecor::inverse_cdf`,
-  `ChiSquared::inverse_cdf`, and `Beta::inverse_cdf` terminate a bisection at
-  roughly `1e-5` absolute (the returned values are dyadic rationals), while the
-  corresponding `cdf`/`pdf` are accurate to near machine precision. Taking the
-  quantiles at face value cost about `5e-6` in ANOVA power and `2.6e-5` in
-  Clopper-Pearson bounds. `power::refine_upper_quantile` and
-  `proportion::refine_beta_quantile` polish the estimate with Newton steps on
-  the CDF, which restores full precision. Any new code needing an F, chi-square,
-  or Beta quantile should do the same.
+- **statrs coarse quantiles (resolved in 0.19)** -  under statrs 0.17,
+  `FisherSnedecor::inverse_cdf`, `ChiSquared::inverse_cdf`, and
+  `Beta::inverse_cdf` terminated a bisection at roughly `1e-5` absolute (the
+  returned values were dyadic rationals), while the corresponding `cdf`/`pdf`
+  were accurate to near machine precision. Taking the quantiles at face value
+  cost about `5e-6` in ANOVA power and `2.6e-5` in Clopper-Pearson bounds.
+  statrs 0.19 fixes this: raw `inverse_cdf` now round-trips through `cdf` to
+  `1e-16`. `power::refine_upper_quantile` and
+  `proportion::refine_beta_quantile` are retained anyway, and now converge on
+  the first Newton step. They pin the invariant `cdf(q) == p` to the accurate
+  primitives, so precision no longer depends on the inverse-CDF implementation.
 
 
 ## Future work (backlog)

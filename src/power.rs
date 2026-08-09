@@ -398,10 +398,12 @@ impl FTestAnovaPower {
 
 /// Polish a quantile estimate with Newton steps on the CDF.
 ///
-/// statrs' `FisherSnedecor::inverse_cdf` ends a coarse bisection around 1e-5
-/// absolute, which shows up as ~5e-6 error in the resulting power. Its `cdf`
-/// and `pdf` are accurate to near machine precision, so a few Newton steps
-/// starting from that estimate recover full precision.
+/// Guarantees `cdf(x) == p` to machine precision regardless of how accurate the
+/// backend's `inverse_cdf` is. statrs 0.17 ended a coarse bisection around 1e-5
+/// absolute here, which showed up as ~5e-6 error in the resulting power; 0.19
+/// resolves that, so this now converges on the first step. It is retained
+/// because `cdf` and `pdf` are the accurate primitives, and pinning the
+/// invariant to them keeps power independent of the inverse-CDF implementation.
 fn refine_upper_quantile<D>(dist: &D, p: f64, start: f64) -> f64
 where
     D: ContinuousCDF<f64, f64> + Continuous<f64, f64>,

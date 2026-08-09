@@ -29,12 +29,18 @@ pub fn from_polars(
                 out = out.with_column(name, vals)?;
             }
             DataType::String => {
-                let vals = series
+                let ca = series
                     .str()
-                    .map_err(|e| InferustError::InvalidInput(e.to_string()))?
-                    .into_no_null_iter()
-                    .map(|s| s.to_string())
-                    .collect::<Vec<_>>();
+                    .map_err(|e| InferustError::InvalidInput(e.to_string()))?;
+                let mut vals = Vec::with_capacity(height);
+                for opt in ca.iter() {
+                    let Some(s) = opt else {
+                        return Err(InferustError::InvalidInput(format!(
+                            "column `{name}` has nulls; call drop_nulls first"
+                        )));
+                    };
+                    vals.push(s.to_string());
+                }
                 out = out.with_categorical_column(name, vals)?;
             }
             other => {

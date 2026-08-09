@@ -1,6 +1,6 @@
 [package]
 name = "inferust"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Statistical modeling for Rust - OLS/WLS regression, GLM, survival analysis, ARIMA/VAR, nonparametric tests, and more. A statsmodels-style library."
 license = "MIT"
@@ -24,10 +24,10 @@ default = []
 polars = ["dep:polars"]
 
 [dependencies]
-nalgebra = "0.33"
-statrs = "0.17"
-thiserror = "1"
-polars = { version = "0.46", optional = true, default-features = false, features = ["dtype-full"] }
+nalgebra = "0.35"
+statrs = "0.19"
+thiserror = "2"
+polars = { version = "0.55", optional = true, default-features = false, features = ["dtype-full"] }
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }

@@ -198,9 +198,11 @@ pub fn proportion_confint(
 
 /// Beta quantile at `p`, polished with Newton steps on the CDF.
 ///
-/// statrs' `Beta::inverse_cdf` stops a coarse bisection around 1e-5 absolute,
-/// which is too wide for the exact Clopper-Pearson and Jeffreys intervals. Its
-/// `cdf` and `pdf` are accurate to near machine precision.
+/// Guarantees `cdf(x) == p` to machine precision regardless of how accurate the
+/// backend's `inverse_cdf` is. statrs 0.17 stopped a coarse bisection around
+/// 1e-5 absolute, too wide for the exact Clopper-Pearson and Jeffreys
+/// intervals; 0.19 resolves that, so this now converges on the first step. It
+/// is retained because `cdf` and `pdf` are the accurate primitives.
 fn refine_beta_quantile(beta: &Beta, p: f64) -> f64 {
     let mut x = beta.inverse_cdf(p);
     for _ in 0..40 {

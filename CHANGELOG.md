@@ -2,6 +2,42 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.3.0] - 2026-08-08
+
+### Changed
+
+- **Dependency upgrades** - `nalgebra` 0.33 to 0.35, `statrs` 0.17 to 0.19,
+  `thiserror` 1 to 2, and `polars` 0.46 to 0.55. No inferust API changed, and all 300
+  parity and unit tests pass unmodified.
+- **Deduplicated the dependency tree** - `statrs` 0.17 pulled `nalgebra` 0.32 while the
+  crate depended on 0.33 directly, so both were compiled, along with two copies of
+  `simba`. `statrs` 0.19 shares `nalgebra` 0.35, and `cargo tree --duplicates` is now
+  empty.
+
+### Fixed
+
+- **Polars string columns** - `from_polars` no longer relies on `into_no_null_iter`,
+  which stopped satisfying its trait bounds for `StringChunked` in polars 0.55. The
+  replacement also closes a latent gap: null string entries now raise the same
+  "call drop_nulls first" error that null float columns already did, instead of being
+  silently skipped.
+
+### Breaking
+
+- Only for users of the optional `polars` feature: `polars_bridge::from_polars` takes a
+  `&polars::prelude::DataFrame`, so callers must move to polars 0.55. The default
+  feature set is unaffected, and `nalgebra` and `statrs` are internal only, so nothing
+  else changes for downstream code.
+
+### Notes
+
+- **statrs quantile precision is fixed upstream** - the coarse `inverse_cdf` bisection
+  documented in 0.2.0 is resolved in statrs 0.19; raw quantiles now round-trip through
+  `cdf` to `1e-16` rather than `1e-5`. `power::refine_upper_quantile` and
+  `proportion::refine_beta_quantile` are retained and now converge on the first Newton
+  step, keeping `cdf(q) == p` pinned to the accurate primitives. `docs/parity.md` has
+  been updated so it no longer tells contributors to work around a resolved defect.
+
 ## [0.2.0] - 2026-07-30
 
 ### Added
