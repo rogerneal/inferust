@@ -2,7 +2,12 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
-## [0.3.0] - 2026-08-08
+## [0.3.1] - 2026-08-10
+
+Same content as the aborted 0.3.0 upload. That version was published during a GitHub
+Actions billing outage that made the release look failed; the git tag and branch were
+rolled back, and 0.3.0 should be yanked. crates.io does not reuse version numbers, so
+this is 0.3.1.
 
 ### Changed
 
