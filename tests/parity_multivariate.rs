@@ -80,7 +80,7 @@ fn parity_pca() {
 fn parity_manova() {
     let fx = load_fixture("manova");
     let groups_json = fx["dataset"]["groups"].as_array().expect("groups");
-    let groups: Vec<Vec<Vec<f64>>> = groups_json.iter().map(|g| as_f64_matrix(g)).collect();
+    let groups: Vec<Vec<Vec<f64>>> = groups_json.iter().map(as_f64_matrix).collect();
     let result = one_way_manova(&groups).expect("manova failed");
 
     assert_parity(
