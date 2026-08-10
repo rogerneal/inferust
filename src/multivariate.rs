@@ -8,6 +8,10 @@ use statrs::distribution::{ContinuousCDF, FisherSnedecor};
 use crate::error::{InferustError, Result};
 
 /// One-way MANOVA result using Wilks' lambda with Rao's F approximation.
+///
+/// `df_hypothesis`, `df_error`, `f_statistic`, and `p_value` follow Rao's
+/// approximation as implemented by `statsmodels.multivariate.manova.MANOVA`
+/// (not the single-root shortcut that uses `n − g − p + 1` error df).
 #[derive(Debug, Clone)]
 pub struct ManovaResult {
     pub wilks_lambda: f64,
@@ -56,9 +60,8 @@ pub fn one_way_manova(groups: &[Vec<Vec<f64>>]) -> Result<ManovaResult> {
     let det_e = regularized_determinant(&e);
     let det_total = regularized_determinant(&(e + h));
     let wilks_lambda = (det_e / det_total).clamp(0.0, 1.0);
-    let df_hypothesis = (p * (g - 1)) as f64;
-    let df_error = (n_total - g - p + 1).max(1) as f64;
-    let f_statistic = ((1.0 - wilks_lambda) / wilks_lambda.max(1e-12)) * df_error / df_hypothesis;
+    let q = g - 1; // hypothesis degrees of freedom for the group effect
+    let (f_statistic, df_hypothesis, df_error) = rao_f_from_wilks(wilks_lambda, p, q, n_total);
     let f_dist = FisherSnedecor::new(df_hypothesis, df_error)
         .map_err(|_| InferustError::InvalidInput("invalid F distribution".into()))?;
     let p_value = 1.0 - f_dist.cdf(f_statistic);
@@ -71,6 +74,29 @@ pub fn one_way_manova(groups: &[Vec<Vec<f64>>]) -> Result<ManovaResult> {
         groups: g,
         responses: p,
     })
+}
+
+/// Rao's F approximation for Wilks' λ with `p` responses and hypothesis df `q`.
+///
+/// Returns `(F, df1, df2)`. Matches `statsmodels` `MANOVA.mv_test` for the
+/// one-way group effect (`q = g − 1`).
+fn rao_f_from_wilks(wilks: f64, p: usize, q: usize, n_total: usize) -> (f64, f64, f64) {
+    let p = p as f64;
+    let q = q as f64;
+    let n = n_total as f64;
+    let r = n - 1.0 - (p + q + 1.0) / 2.0;
+    let u = (p * q - 2.0) / 4.0;
+    let denom = p * p + q * q - 5.0;
+    let t = if denom > 0.0 {
+        ((p * p * q * q - 4.0) / denom).sqrt()
+    } else {
+        1.0
+    };
+    let df1 = p * q;
+    let df2 = (r * t - 2.0 * u).max(1.0);
+    let root = wilks.clamp(1e-300, 1.0).powf(1.0 / t);
+    let f = ((1.0 - root) / root) * (df2 / df1);
+    (f, df1, df2)
 }
 
 /// Principal component analysis result.

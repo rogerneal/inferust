@@ -23,12 +23,13 @@ at runtime; only contributors regenerating the fixtures need `statsmodels` and
 ## Regenerating fixtures
 
 ```bash
-pip install statsmodels scipy numpy
+pip install statsmodels scipy numpy pandas linearmodels
 python3 scripts/parity_statsmodels.py
 ```
 
 This rewrites every JSON file under `tests/fixtures/statsmodels/`. After
 regeneration, run `cargo test --tests parity_*` and resolve any new diffs.
+`linearmodels` is required only for the `panel_fe` fixture.
 
 `scripts/stl_reference.py` is a companion development oracle: a direct
 transcription of Cleveland's Fortran STL that agrees with
@@ -65,6 +66,9 @@ suite.
 | STL (trend, seasonal, resid) | `1e-11`, `1e-9` robust | Independent loess reimplementation; only accumulated rounding differs. The robust fit runs 15 outer reweighting passes, hence the looser tier. |
 | Exponential smoothing / Holt-Winters fitted, SSE, forecasts | `1e-10` | Identical recursions, with one documented horizon exception (see Known gaps). |
 | ARIMA / VAR forecast standard errors and intervals | `1e-9` to `1e-10` | Analytic ψ-weights vs statsmodels' Kalman filter; the seasonal-difference state converges to about `1e-10`. |
+| PCA mean, loadings, variance, scores | `1e-10` to `1e-9` | Same covariance eigendecomposition; loadings/scores compared after sign alignment. |
+| One-way MANOVA Wilks' λ, Rao F, df, p | `1e-10` to `1e-8` | Identical SSCP construction; F uses Rao's approximation. |
+| Panel entity FE params / within bse | `1e-10` | Within transform + OLS; params also match linearmodels entity FE. |
 
 ## Audit matrix
 
@@ -137,6 +141,9 @@ modules that have at least one parity fixture today; modules listed under
 | `gee` | `gee_poisson` | `Gee` (Poisson, exchangeable) | params, bse | passing |
 | `mixed` | `mixed_small` | `MixedLm` (random intercept) | fixed effects, group variance | passing |
 | `robust` | `robust_small` | `Rlm` (Huber) | params, bse | passing |
+| `multivariate` | `pca` | `pca` | mean, loadings (sign-aligned), explained variance / ratio, scores | passing |
+| `multivariate` | `manova` | `one_way_manova` | Wilks' λ, Rao F, df, p | passing |
+| `panel` | `panel_fe` | `PanelOls::fit_entity_fe` | params (vs linearmodels), within bse/t/p/R² (vs demean+OLS) | passing |
 
 ## Known gaps
 
@@ -221,10 +228,8 @@ Gaps in the audit: modules with no fixture at all, plus estimators whose fixture
 pins only part of the result surface. Priority is **bold** for high-traffic
 estimators.
 
-- **`multivariate`** -  MANOVA and PCA; PCA in particular against
-  `statsmodels.multivariate.pca.PCA`.
-- **`panel`** -  fixed- and random-effects estimators; closest reference is
-  `linearmodels.panel` rather than statsmodels proper.
+- **`panel` random effects** -  entity FE is covered by `panel_fe`. There is no
+  panel RE estimator yet (use `mixed::MixedLinearModel` for random intercepts).
 - **`gam`, `gmm`, `imputation`, `treatment`** -  each needs a dedicated fixture.
 - **`time_series::Sarimax` / `Vecm` / `Varmax`** -  large surface and
   lowest-priority numerical parity because of multiple optimiser choices. The

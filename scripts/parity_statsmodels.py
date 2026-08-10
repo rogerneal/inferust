@@ -1661,6 +1661,163 @@ def run_forecast_ci(seed: int) -> dict[str, Any]:
     }
 
 
+def run_pca(n: int, k: int, seed: int) -> dict[str, Any]:
+    """Covariance PCA via statsmodels.multivariate.pca.PCA.
+
+    Matches inferust's `pca`: demean, no column standardization, eigendecomposition
+    of the sample covariance. statsmodels reports eigenvalues of X'X (not divided
+    by n−1); the fixture stores covariance eigenvalues so Rust can compare
+    `explained_variance` directly. Loadings may flip sign relative to inferust;
+    the Rust test aligns signs before checking.
+    """
+    from statsmodels.multivariate.pca import PCA
+
+    rng = _lcg(seed)
+    x = np.empty((n, k), dtype=np.float64)
+    for i in range(n):
+        for j in range(k):
+            x[i, j] = rng.standard_normal()
+    # Build a dominant first component so ratio checks are meaningful.
+    for i in range(n):
+        x[i, 1] = 0.8 * x[i, 0] + 0.2 * x[i, 1]
+        if k > 2:
+            x[i, 2] = 0.5 * x[i, 0] + 0.5 * x[i, 2]
+
+    fit = PCA(x, standardize=False, demean=True, normalize=False, method="eig")
+    loadings = np.asarray(fit.loadings, dtype=np.float64)
+    # Convert X'X eigenvalues → sample-covariance eigenvalues.
+    explained = np.asarray(fit.eigenvals, dtype=np.float64).ravel() / (n - 1)
+    total = explained.sum()
+    ratios = explained / total
+    mean = x.mean(axis=0)
+    xc = x - mean
+    scores = xc @ loadings
+
+    return {
+        "kind": "pca",
+        "n": n,
+        "k": k,
+        "seed": seed,
+        "dataset": {"x": _matrix(x)},
+        "mean": _to_list(mean),
+        "components": _matrix(loadings.T),  # row-per-component, like inferust
+        "explained_variance": _to_list(explained),
+        "explained_variance_ratio": _to_list(ratios),
+        "scores": _matrix(scores),
+    }
+
+
+def run_manova(seed: int) -> dict[str, Any]:
+    """One-way MANOVA via statsmodels.multivariate.manova.MANOVA."""
+    from statsmodels.multivariate.manova import MANOVA
+    import pandas as pd
+
+    rng = _lcg(seed)
+    # 3 groups × 20 obs × 2 responses
+    groups_data: list[list[list[float]]] = []
+    rows_y1: list[float] = []
+    rows_y2: list[float] = []
+    rows_g: list[str] = []
+    for g in range(3):
+        group: list[list[float]] = []
+        for _ in range(20):
+            y1 = 0.8 * g + rng.standard_normal()
+            y2 = 0.3 * g + rng.standard_normal()
+            group.append([y1, y2])
+            rows_y1.append(y1)
+            rows_y2.append(y2)
+            rows_g.append(str(g))
+        groups_data.append(group)
+
+    df = pd.DataFrame({"y1": rows_y1, "y2": rows_y2, "g": rows_g})
+    result = MANOVA.from_formula("y1 + y2 ~ g", data=df).mv_test()
+    table = result["g"]["stat"]
+    # Index 0 is Wilks' lambda row.
+    wilks = float(table.iloc[0, 0])
+    df_h = float(table.iloc[0, 1])
+    df_e = float(table.iloc[0, 2])
+    f_stat = float(table.iloc[0, 3])
+    p_value = float(table.iloc[0, 4])
+
+    return {
+        "kind": "manova",
+        "seed": seed,
+        "dataset": {"groups": groups_data},
+        "wilks_lambda": wilks,
+        "df_hypothesis": df_h,
+        "df_error": df_e,
+        "f_statistic": f_stat,
+        "p_value": p_value,
+        "groups": 3,
+        "responses": 2,
+    }
+
+
+def run_panel_fe(n_entities: int, n_times: int, k: int, seed: int) -> dict[str, Any]:
+    """Entity fixed-effects panel OLS.
+
+    Coefficients are validated against ``linearmodels.panel.PanelOLS`` with
+    ``entity_effects=True``. Standard errors are from statsmodels OLS on the
+    same within-transformed data (no intercept), which matches inferust's
+    demean-then-``Ols::no_intercept`` implementation. linearmodels applies an
+    extra within-df correction to SEs, so those are not used here.
+    """
+    from linearmodels.panel import PanelOLS
+    import pandas as pd
+
+    rng = _lcg(seed)
+    rows: list[dict[str, Any]] = []
+    x_rows: list[list[float]] = []
+    y_rows: list[float] = []
+    entities: list[int] = []
+    for e in range(n_entities):
+        alpha_e = rng.standard_normal()
+        for t in range(n_times):
+            x_i = [rng.standard_normal() for _ in range(k)]
+            y_i = (
+                1.0
+                + alpha_e
+                + sum((j + 1) / k * x_i[j] for j in range(k))
+                + 0.25 * rng.standard_normal()
+            )
+            row = {"entity": e, "time": t, "y": y_i}
+            for j, v in enumerate(x_i):
+                row[f"x{j + 1}"] = v
+            rows.append(row)
+            x_rows.append(x_i)
+            y_rows.append(y_i)
+            entities.append(e)
+
+    df = pd.DataFrame(rows).set_index(["entity", "time"])
+    exog_cols = [f"x{j + 1}" for j in range(k)]
+    panel = PanelOLS(df["y"], df[exog_cols], entity_effects=True).fit()
+
+    # Within SEs via demean + OLS (matches inferust).
+    flat = df.reset_index()
+    dm = flat.copy()
+    for col in ["y", *exog_cols]:
+        dm[col] = flat[col] - flat.groupby("entity")[col].transform("mean")
+    within = sm.OLS(dm["y"], dm[exog_cols]).fit()
+
+    return {
+        "kind": "panel_fe",
+        "n_entities": n_entities,
+        "n_times": n_times,
+        "k": k,
+        "seed": seed,
+        "dataset": {
+            "x": _matrix(np.asarray(x_rows, dtype=np.float64)),
+            "y": _to_list(np.asarray(y_rows, dtype=np.float64)),
+            "entities": entities,
+        },
+        "params": _to_list(np.asarray(panel.params, dtype=np.float64)),
+        "bse": _to_list(np.asarray(within.bse, dtype=np.float64)),
+        "tvalues": _to_list(np.asarray(within.tvalues, dtype=np.float64)),
+        "pvalues": _to_list(np.asarray(within.pvalues, dtype=np.float64)),
+        "rsquared": float(within.rsquared),
+    }
+
+
 def emit(out_dir: Path, name: str, payload: dict[str, Any]) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / f"{name}.json"
@@ -1778,6 +1935,11 @@ def main() -> None:
     emit(out, "stl", run_stl(seed=72))
     emit(out, "holt_winters", run_holt_winters(seed=73))
     emit(out, "forecast_ci", run_forecast_ci(seed=74))
+
+    # Multivariate PCA / MANOVA and panel entity FE (0.3.2)
+    emit(out, "pca", run_pca(n=60, k=3, seed=80))
+    emit(out, "manova", run_manova(seed=81))
+    emit(out, "panel_fe", run_panel_fe(n_entities=12, n_times=8, k=2, seed=82))
 
     print(f"\nstatsmodels version: {sm.__version__}")
 

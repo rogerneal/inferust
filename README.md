@@ -482,20 +482,22 @@ python3 scripts/bench_all_statsmodels.py   # requires numpy, scipy, statsmodels,
 cargo run --release --example bench_smoke
 ```
 
-See [bench/README.md](bench/README.md) for Docker-based reproducible runs.
+See [bench/README.md](bench/README.md) for Docker-based reproducible runs
+(`bench/Dockerfile.rust` and `bench/Dockerfile.python`).
 
-On the current local benchmark machine (Apple Silicon, release build):
+**inferust vs statsmodels (same synthetic data, Apple Silicon, release build):**
 
-| Case | Median fit time |
-|------|-----------------|
-| OLS 10k × 8 features (Cholesky) | 0.769 ms |
-| OLS 10k × 8 features (SVD) | 2.474 ms |
-| statsmodels OLS (same data) | 2.492 ms |
-| Smoke OLS 5k × 4 features | 0.568 ms |
-| Smoke Logistic 5k × 4 | 1.903 ms |
-| Smoke Poisson 5k × 4 | 2.436 ms |
+| Case | inferust median | statsmodels median | Notes |
+|------|----------------:|-------------------:|-------|
+| OLS 10k × 8 (Cholesky) | 0.769 ms | 2.492 ms | ~3.2× faster on this machine |
+| OLS 10k × 8 (SVD) | 2.474 ms | 2.492 ms | Comparable when both use SVD-class paths |
+| Smoke OLS 5k × 4 | 0.568 ms | — | CI smoke path |
+| Smoke Logistic 5k × 4 | 1.903 ms | — | CI smoke path |
+| Smoke Poisson 5k × 4 | 2.436 ms | — | CI smoke path |
 
-Benchmark results vary by machine and BLAS/LAPACK configuration, so treat these as a local smoke test rather than a universal claim. The checksum printed by each script is useful for confirming both implementations fit equivalent data.
+Numbers vary by machine and BLAS/LAPACK. Treat them as a local smoke check, not a
+universal claim. Each script prints a checksum so both sides can be confirmed to
+fit equivalent data.
 
 ---
 
@@ -534,8 +536,7 @@ match result {
 Ordered roughly by priority. The parity gaps are tracked in more detail under
 "Future work" in [docs/parity.md](docs/parity.md).
 
-- [ ] Parity fixtures for `multivariate` (PCA against `statsmodels.multivariate.pca.PCA`, MANOVA)
-- [ ] Parity fixtures for `panel` fixed- and random-effects estimators
+- [ ] Panel random-effects estimator (entity FE is already parity-tested)
 - [ ] Binomial and Gamma dispatch through the generic `glm_family` front-end, plus bse/llf/deviance
 - [ ] Fuller output sets for the `gee`, `mixed`, and `robust` fixtures, which currently pin only headline coefficients
 - [ ] Parity fixtures for `gam`, `gmm`, `imputation`, and `treatment`
@@ -543,6 +544,8 @@ Ordered roughly by priority. The parity gaps are tracked in more detail under
 
 ### Shipped
 
+- [x] PCA and one-way MANOVA parity against statsmodels (Rao F for Wilks' λ)
+- [x] Panel entity fixed-effects parity against linearmodels / within OLS
 - [x] Logistic regression (GLM with logit link)
 - [x] Gamma regression (GLM with InversePower/Log/Identity links)
 - [x] Ridge / Lasso / ElasticNet regularization

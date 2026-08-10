@@ -2,6 +2,34 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.3.2] - 2026-08-10
+
+### Added
+
+- **PCA parity** - fixture and tests against `statsmodels.multivariate.pca.PCA`
+  (covariance / demean / eig), covering mean, loadings (sign-aligned), explained
+  variance and ratio, and scores.
+- **One-way MANOVA parity** - fixture and tests against
+  `statsmodels.multivariate.manova.MANOVA` for Wilks' λ, Rao F, degrees of
+  freedom, and p-value.
+- **Panel entity FE parity** - fixture and tests for `PanelOls::fit_entity_fe`.
+  Coefficients match `linearmodels.panel.PanelOLS(entity_effects=True)`;
+  within standard errors match demean-then-OLS (inferust's implementation).
+
+### Fixed
+
+- **MANOVA F approximation** - replaced the single-root shortcut
+  (`df_error = n − g − p + 1`) with Rao's F approximation so Wilks' λ inference
+  matches statsmodels. Wilks' λ itself was already correct.
+- **CI Actions on Node 20** - bumped `actions/checkout` to v5 and `actions/cache`
+  to v5 so GitHub runners stop force-running deprecated Node 20 actions.
+
+### Notes
+
+- Panel random effects remain unimplemented; use `mixed::MixedLinearModel` for
+  random intercepts. Regenerating fixtures now also needs `linearmodels` for
+  `panel_fe`.
+
 ## [0.3.1] - 2026-08-10
 
 Same content as the aborted 0.3.0 upload. That version was published during a GitHub
