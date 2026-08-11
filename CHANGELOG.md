@@ -2,6 +2,26 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.4.0] - 2026-08-10
+
+### Added
+
+- **Panel random effects** - `PanelOls::fit_random_effects` implements the
+  Swamy–Arora / GLS quasi-demeaning estimator with intercept, matching
+  `linearmodels.panel.RandomEffects` (`cov_type="unadjusted"`). Results include
+  σ²_e, σ²_u, and per-entity θ.
+- **Hausman test** - `hausman_fe_re` compares entity FE slopes to RE slopes using
+  the FE-within OLS covariance (the same SE convention as `fit_entity_fe`).
+- **Parity** - `panel_re` fixture plus tests for RE params/SEs/variance
+  components/θ and the Hausman statistic. Regenerating fixtures needs
+  `linearmodels`.
+
+### Notes
+
+- Entity FE was already covered in 0.3.2. Time FE / two-way FE remain future work.
+- Hausman uses inferust's within OLS covariance, not linearmodels' within-df
+  correction, so it is comparable to a demean-then-OLS FE fit.
+
 ## [0.3.2] - 2026-08-10
 
 ### Added

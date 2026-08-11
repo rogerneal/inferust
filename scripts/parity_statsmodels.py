@@ -1818,6 +1818,118 @@ def run_panel_fe(n_entities: int, n_times: int, k: int, seed: int) -> dict[str, 
     }
 
 
+def run_panel_re(n_entities: int, n_times: int, k: int, seed: int) -> dict[str, Any]:
+    """Entity random-effects (Swamy–Arora) via linearmodels.RandomEffects.
+
+    Always includes an intercept. Also stores a Hausman statistic computed with
+    the same FE-within OLS covariance that inferust uses (not linearmodels'
+    within-df-corrected FE SEs), so the Rust Hausman test can be checked
+    directly.
+    """
+    from linearmodels.panel import RandomEffects
+    import pandas as pd
+
+    rng = _lcg(seed)
+    rows: list[dict[str, Any]] = []
+    x_rows: list[list[float]] = []
+    y_rows: list[float] = []
+    entities: list[int] = []
+    for e in range(n_entities):
+        alpha_e = rng.standard_normal()
+        for t in range(n_times):
+            x_i = [rng.standard_normal() for _ in range(k)]
+            y_i = (
+                1.0
+                + alpha_e
+                + sum((j + 1) / k * x_i[j] for j in range(k))
+                + 0.25 * rng.standard_normal()
+            )
+            row = {"entity": e, "time": t, "y": y_i}
+            for j, v in enumerate(x_i):
+                row[f"x{j + 1}"] = v
+            rows.append(row)
+            x_rows.append(x_i)
+            y_rows.append(y_i)
+            entities.append(e)
+
+    df = pd.DataFrame(rows).set_index(["entity", "time"])
+    exog_cols = [f"x{j + 1}" for j in range(k)]
+    exog = df[exog_cols].copy()
+    exog.insert(0, "const", 1.0)
+    re = RandomEffects(df["y"], exog).fit(cov_type="unadjusted", debiased=True)
+
+    # Hausman with FE-within OLS cov and Swamy–Arora GLS cov (matches inferust).
+    # linearmodels' FE SEs use a different df correction, so they are not used here.
+    flat = df.reset_index()
+    dm = flat.copy()
+    for col in ["y", *exog_cols]:
+        dm[col] = flat[col] - flat.groupby("entity")[col].transform("mean")
+    fe = sm.OLS(dm["y"], dm[exog_cols]).fit()
+    b_fe = np.asarray(fe.params, dtype=np.float64)
+    b_re = np.asarray(re.params, dtype=np.float64)[1:]
+    d = b_fe - b_re
+    # Rebuild RE covariance from the quasi-demeaned design (unadjusted, debiased).
+    # Using linearmodels' cov here can make V_fe − V_re indefinite when the two
+    # slope vectors nearly agree.
+    n = len(y_rows)
+    y_arr = np.asarray(y_rows, dtype=np.float64)
+    x_arr = np.asarray(x_rows, dtype=np.float64)
+    groups: dict[int, list[int]] = {}
+    for i, e in enumerate(entities):
+        groups.setdefault(int(e), []).append(i)
+    y_q = y_arr.copy()
+    x_q = x_arr.copy()
+    theta_vals = np.asarray(re.theta, dtype=np.float64).ravel()
+    ents_sorted = sorted(groups)
+    theta_map = {e: float(th) for e, th in zip(ents_sorted, theta_vals)}
+    entity_y = {e: y_arr[idx].mean() for e, idx in groups.items()}
+    entity_x = {e: x_arr[idx].mean(0) for e, idx in groups.items()}
+    for e, idx in groups.items():
+        th = theta_map[e]
+        y_q[idx] = y_arr[idx] - th * entity_y[e]
+        x_q[idx] = x_arr[idx] - th * entity_x[e]
+    const = np.array([1.0 - theta_map[e] for e in entities])
+    x_design = np.column_stack([const, x_q])
+    beta_gls, *_ = np.linalg.lstsq(x_design, y_q, rcond=None)
+    resid_q = y_q - x_design @ beta_gls
+    df_gls = n - x_design.shape[1]
+    s2_gls = float(resid_q @ resid_q) / df_gls
+    cov_re = s2_gls * np.linalg.inv(x_design.T @ x_design)
+    v = np.asarray(fe.cov_params(), dtype=np.float64) - cov_re[1:, 1:]
+    v = 0.5 * (v + v.T) + np.eye(v.shape[0]) * 1e-14
+    hausman_stat = float(d.T @ np.linalg.inv(v) @ d)
+    hausman_stat = max(0.0, hausman_stat)
+    from scipy import stats as scipy_stats
+
+    hausman_p = float(1.0 - scipy_stats.chi2.cdf(hausman_stat, len(d)))
+
+    theta = theta_vals
+    vd = re.variance_decomposition
+    return {
+        "kind": "panel_re",
+        "n_entities": n_entities,
+        "n_times": n_times,
+        "k": k,
+        "seed": seed,
+        "dataset": {
+            "x": _matrix(np.asarray(x_rows, dtype=np.float64)),
+            "y": _to_list(np.asarray(y_rows, dtype=np.float64)),
+            "entities": entities,
+        },
+        "params": _to_list(np.asarray(re.params, dtype=np.float64)),
+        "bse": _to_list(np.asarray(re.std_errors, dtype=np.float64)),
+        "tvalues": _to_list(np.asarray(re.tstats, dtype=np.float64)),
+        "pvalues": _to_list(np.asarray(re.pvalues, dtype=np.float64)),
+        "rsquared": float(re.rsquared),
+        "sigma2_e": float(vd["Residual"]),
+        "sigma2_u": float(vd["Effects"]),
+        "theta": _to_list(theta),
+        "hausman_statistic": hausman_stat,
+        "hausman_df": int(len(d)),
+        "hausman_p_value": hausman_p,
+    }
+
+
 def emit(out_dir: Path, name: str, payload: dict[str, Any]) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / f"{name}.json"
@@ -1940,6 +2052,9 @@ def main() -> None:
     emit(out, "pca", run_pca(n=60, k=3, seed=80))
     emit(out, "manova", run_manova(seed=81))
     emit(out, "panel_fe", run_panel_fe(n_entities=12, n_times=8, k=2, seed=82))
+
+    # Panel random effects + Hausman (0.4.0)
+    emit(out, "panel_re", run_panel_re(n_entities=12, n_times=8, k=2, seed=83))
 
     print(f"\nstatsmodels version: {sm.__version__}")
 

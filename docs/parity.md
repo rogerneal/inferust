@@ -69,6 +69,8 @@ suite.
 | PCA mean, loadings, variance, scores | `1e-10` to `1e-9` | Same covariance eigendecomposition; loadings/scores compared after sign alignment. |
 | One-way MANOVA Wilks' λ, Rao F, df, p | `1e-10` to `1e-8` | Identical SSCP construction; F uses Rao's approximation. |
 | Panel entity FE params / within bse | `1e-10` | Within transform + OLS; params also match linearmodels entity FE. |
+| Panel RE params, bse, σ²_e/σ²_u, θ | `1e-10` to `1e-8` | Swamy–Arora GLS matching linearmodels RandomEffects. |
+| Hausman FE vs RE | `1e-8` | Uses within-OLS FE cov (inferust), not linearmodels FE df correction. |
 
 ## Audit matrix
 
@@ -144,6 +146,7 @@ modules that have at least one parity fixture today; modules listed under
 | `multivariate` | `pca` | `pca` | mean, loadings (sign-aligned), explained variance / ratio, scores | passing |
 | `multivariate` | `manova` | `one_way_manova` | Wilks' λ, Rao F, df, p | passing |
 | `panel` | `panel_fe` | `PanelOls::fit_entity_fe` | params (vs linearmodels), within bse/t/p/R² (vs demean+OLS) | passing |
+| `panel` | `panel_re` | `PanelOls::fit_random_effects`, `hausman_fe_re` | RE params/bse/σ²/θ (vs linearmodels), Hausman χ² (vs within-OLS cov) | passing |
 
 ## Known gaps
 
@@ -228,8 +231,8 @@ Gaps in the audit: modules with no fixture at all, plus estimators whose fixture
 pins only part of the result surface. Priority is **bold** for high-traffic
 estimators.
 
-- **`panel` random effects** -  entity FE is covered by `panel_fe`. There is no
-  panel RE estimator yet (use `mixed::MixedLinearModel` for random intercepts).
+- **Panel time FE / two-way FE** -  entity FE and RE are covered. Time-only and
+  two-way fixed effects are not implemented yet.
 - **`gam`, `gmm`, `imputation`, `treatment`** -  each needs a dedicated fixture.
 - **`time_series::Sarimax` / `Vecm` / `Varmax`** -  large surface and
   lowest-priority numerical parity because of multiple optimiser choices. The

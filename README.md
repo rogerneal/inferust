@@ -45,6 +45,7 @@
 | `robust` | Huber robust linear regression | `statsmodels.RLM` basics |
 | `gee` | independence-working-correlation GEE starters | `statsmodels.GEE` basics |
 | `mixed` | random-intercept mixed linear model starter | `statsmodels.MixedLM` basics |
+| `panel` | entity fixed effects (within), random effects (Swamy–Arora), and Hausman FE vs RE test | `linearmodels.panel.PanelOLS`, `RandomEffects` |
 | `correlation` | Pearson, Spearman, full correlation matrix | `df.corr()` |
 
 ---
@@ -536,7 +537,7 @@ match result {
 Ordered roughly by priority. The parity gaps are tracked in more detail under
 "Future work" in [docs/parity.md](docs/parity.md).
 
-- [ ] Panel random-effects estimator (entity FE is already parity-tested)
+- [ ] Panel time FE and two-way FE
 - [ ] Binomial and Gamma dispatch through the generic `glm_family` front-end, plus bse/llf/deviance
 - [ ] Fuller output sets for the `gee`, `mixed`, and `robust` fixtures, which currently pin only headline coefficients
 - [ ] Parity fixtures for `gam`, `gmm`, `imputation`, and `treatment`
@@ -544,6 +545,7 @@ Ordered roughly by priority. The parity gaps are tracked in more detail under
 
 ### Shipped
 
+- [x] Panel entity random effects (Swamy–Arora) and Hausman FE vs RE test
 - [x] PCA and one-way MANOVA parity against statsmodels (Rao F for Wilks' λ)
 - [x] Panel entity fixed-effects parity against linearmodels / within OLS
 - [x] Logistic regression (GLM with logit link)
