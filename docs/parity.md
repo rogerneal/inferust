@@ -152,7 +152,7 @@ modules that have at least one parity fixture today; modules listed under
 | `glm_family` | `ols_small`, `poisson_small`, `logit_small`, `gamma_glm`, `inverse_gaussian_glm` | `Glm` dispatch (Gaussian, Poisson, Binomial, Gamma, InverseGaussian) | params/bse (+ llf/deviance/scale where present) via the generic front-end | passing |
 | `gee` | `gee_poisson`, `gee_small` | `Gee` (Poisson, exchangeable) | params, bse, z, p, rho (poisson) | passing |
 | `mixed` | `mixed_small` | `MixedLm` (random intercept) | fixed effects params/bse | passing |
-| `robust` | `robust_small` | `Rlm` (Huber) | params, sandwich bse/t/p | passing |
+| `robust` | `robust_small` | `Rlm` (Huber) | params (sandwich SE smoke-tested, not pinned to RLM.bse) | passing |
 | `multivariate` | `pca` | `pca` | mean, loadings (sign-aligned), explained variance / ratio, scores | passing |
 | `multivariate` | `manova` | `one_way_manova` | Wilks' λ, Rao F, df, p | passing |
 | `panel` | `panel_fe` | `PanelOls::fit_entity_fe` | params (vs linearmodels), within bse/t/p/R² (vs demean+OLS) | passing |

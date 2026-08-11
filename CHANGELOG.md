@@ -12,9 +12,9 @@ All notable changes to `inferust` are documented here. This project follows sema
 - **Parity breadth** - fixtures and tests for `GaussianGam`, `Iv2Sls`,
   `MiceImputer`, `PropensityScore::ipw`, `Sarimax` (exog OLS), `Vecm`
   (Johansen eigenvalues/trace), and `Varmax` (per-equation OLS).
-- **Fuller GEE / robust surfaces** - z/p/rho for GEE Poisson; sandwich bse/t/p
-  for robust RLM. Mixed keeps params/bse (REML llf is not comparable to
-  statsmodels MixedLM.llf).
+- **Fuller GEE surfaces** - z/p/rho for GEE Poisson alongside params/bse.
+  Robust keeps RLM params parity (sandwich SEs use a different convention than
+  RLM.bse). Mixed keeps params/bse (REML llf is not comparable to MixedLM.llf).
 
 ### Notes
 

@@ -559,7 +559,7 @@ Ordered roughly by priority. The parity gaps are tracked in more detail under
 
 ### Shipped
 
-- [x] Fuller `gee` / `robust` fixture outputs (z/p/rho, sandwich SE); mixed remains params/bse
+- [x] Fuller `gee` fixture outputs (z/p/rho); robust/mixed remain params(+bse) with documented SE/llf gaps
 - [x] Parity fixtures for `gam`, `gmm` (IV2SLS), `imputation`, and `treatment`
 - [x] Numerical parity for `Sarimax` (exog OLS), `Vecm` (Johansen), `Varmax` (VAR+exog OLS)
 - [x] Real `GlmFamily::InverseGaussian` estimator (Log / InverseSquared links)
