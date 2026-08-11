@@ -2,6 +2,35 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.5.0] - 2026-08-11
+
+### Added
+
+- **Panel time fixed effects** - `PanelOls::fit_time_fe` demeans by time period
+  then runs OLS without an intercept, matching
+  `linearmodels.panel.PanelOLS(time_effects=True)` on coefficients.
+- **Panel two-way fixed effects** - `PanelOls::fit_two_way_fe` uses iterative
+  entity/time demeaning (method of alternating projections), matching
+  linearmodels with `entity_effects=True, time_effects=True` on balanced and
+  unbalanced panels.
+- **Parity** - `panel_time_fe` and `panel_two_way_fe` fixtures (within-OLS SEs,
+  same convention as entity FE).
+- **`glm_family` Binomial and Gamma parity** - front-end dispatch audited against
+  `logit_small` and `gamma_glm` (params, bse, llf / deviance).
+- **README panel example** - entity FE, time FE, two-way FE, RE, and Hausman.
+
+### Fixed
+
+- **Publish workflow** - tagging after a local `cargo publish` no longer fails
+  CI when the version already exists on crates.io.
+- **`GlmFamily::InverseGaussian`** - no longer silently runs Gamma IRLS; `fit`
+  returns an explicit "not implemented" error until a real IG estimator exists.
+
+### Notes
+
+- FE standard errors remain demean-then-OLS, not linearmodels' within-df
+  correction.
+
 ## [0.4.0] - 2026-08-10
 
 ### Added
@@ -18,7 +47,7 @@ All notable changes to `inferust` are documented here. This project follows sema
 
 ### Notes
 
-- Entity FE was already covered in 0.3.2. Time FE / two-way FE remain future work.
+- Entity FE was already covered in 0.3.2. Time FE / two-way FE arrive in 0.5.0.
 - Hausman uses inferust's within OLS covariance, not linearmodels' within-df
   correction, so it is comparable to a demean-then-OLS FE fit.
 

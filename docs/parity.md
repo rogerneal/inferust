@@ -29,7 +29,7 @@ python3 scripts/parity_statsmodels.py
 
 This rewrites every JSON file under `tests/fixtures/statsmodels/`. After
 regeneration, run `cargo test --tests parity_*` and resolve any new diffs.
-`linearmodels` is required only for the `panel_fe` fixture.
+`linearmodels` is required for the `panel_*` fixtures.
 
 `scripts/stl_reference.py` is a companion development oracle: a direct
 transcription of Cleveland's Fortran STL that agrees with
@@ -139,13 +139,15 @@ modules that have at least one parity fixture today; modules listed under
 | `discrete` | `multinomial_small` | `MultinomialLogit` | params per non-base outcome, llf | passing |
 | `discrete` | `ordered_logit_small` | `OrderedLogit` | params, thresholds, llf | passing |
 | `discrete` | `zip_small` | `ZeroInflatedPoisson` | count & inflation params, llf | passing |
-| `glm_family` | `ols_small`, `poisson_small` | `Glm` dispatch (Gaussian, Poisson) | params routed through the generic front-end (1e-8 / 1e-5) | passing |
+| `glm_family` | `ols_small`, `poisson_small`, `logit_small`, `gamma_glm` | `Glm` dispatch (Gaussian, Poisson, Binomial, Gamma) | params/bse (+ llf/deviance where present) via the generic front-end | passing |
 | `gee` | `gee_poisson` | `Gee` (Poisson, exchangeable) | params, bse | passing |
 | `mixed` | `mixed_small` | `MixedLm` (random intercept) | fixed effects, group variance | passing |
 | `robust` | `robust_small` | `Rlm` (Huber) | params, bse | passing |
 | `multivariate` | `pca` | `pca` | mean, loadings (sign-aligned), explained variance / ratio, scores | passing |
 | `multivariate` | `manova` | `one_way_manova` | Wilks' λ, Rao F, df, p | passing |
 | `panel` | `panel_fe` | `PanelOls::fit_entity_fe` | params (vs linearmodels), within bse/t/p/R² (vs demean+OLS) | passing |
+| `panel` | `panel_time_fe` | `PanelOls::fit_time_fe` | params (vs linearmodels), within bse/t/p/R² (vs demean+OLS) | passing |
+| `panel` | `panel_two_way_fe` | `PanelOls::fit_two_way_fe` | params (vs linearmodels), iterative-within bse/t/p/R² | passing |
 | `panel` | `panel_re` | `PanelOls::fit_random_effects`, `hausman_fe_re` | RE params/bse/σ²/θ (vs linearmodels), Hausman χ² (vs within-OLS cov) | passing |
 
 ## Known gaps
@@ -231,19 +233,15 @@ Gaps in the audit: modules with no fixture at all, plus estimators whose fixture
 pins only part of the result surface. Priority is **bold** for high-traffic
 estimators.
 
-- **Panel time FE / two-way FE** -  entity FE and RE are covered. Time-only and
-  two-way fixed effects are not implemented yet.
+- **Fuller output sets for `gee`, `mixed`, `robust`** -  each has a fixture
+  pinning the headline coefficients, but not the complete result surface.
 - **`gam`, `gmm`, `imputation`, `treatment`** -  each needs a dedicated fixture.
 - **`time_series::Sarimax` / `Vecm` / `Varmax`** -  large surface and
   lowest-priority numerical parity because of multiple optimiser choices. The
   ARIMA/SARIMA/VAR forecast paths are already covered by `forecast_ci`, and
   `Var` itself by `granger_causality`.
-- **Deeper `glm_family` dispatch** -  the `glm_family` row above audits only the
-  Gaussian and Poisson params. Binomial and Gamma dispatch, and the fuller
-  output set (bse, llf, deviance), are still unaudited through the front-end,
-  though the dedicated `Logistic` and `Gamma` estimators are covered directly.
-- **Fuller output sets for `gee`, `mixed`, `robust`** -  each has a fixture
-  pinning the headline coefficients, but not the complete result surface.
+- **`GlmFamily::InverseGaussian`** -  currently rejected at `fit` time; needs a
+  real inverse-Gaussian IRLS path before it can be audited.
 
 ## Process for adding a new estimator to the audit
 

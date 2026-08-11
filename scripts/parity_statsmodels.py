@@ -1930,6 +1930,142 @@ def run_panel_re(n_entities: int, n_times: int, k: int, seed: int) -> dict[str, 
     }
 
 
+def _panel_dataset(
+    n_entities: int, n_times: int, k: int, seed: int, *, drop: set[tuple[int, int]] | None = None
+) -> tuple[Any, list[list[float]], list[float], list[int], list[int]]:
+    """Shared LCG panel builder. Optional ``drop`` removes (entity, time) cells."""
+    import pandas as pd
+
+    rng = _lcg(seed)
+    rows: list[dict[str, Any]] = []
+    x_rows: list[list[float]] = []
+    y_rows: list[float] = []
+    entities: list[int] = []
+    times: list[int] = []
+    drop = drop or set()
+    for e in range(n_entities):
+        alpha_e = rng.standard_normal()
+        for t in range(n_times):
+            # Always advance the LCG for every (e, t) so dropped cells only
+            # thin the sample without shifting subsequent draws.
+            x_i = [rng.standard_normal() for _ in range(k)]
+            gamma_t = 0.35 * np.sin(t)
+            noise = 0.25 * rng.standard_normal()
+            if (e, t) in drop:
+                continue
+            y_i = (
+                1.0
+                + alpha_e
+                + gamma_t
+                + sum((j + 1) / k * x_i[j] for j in range(k))
+                + noise
+            )
+            row = {"entity": e, "time": t, "y": y_i}
+            for j, v in enumerate(x_i):
+                row[f"x{j + 1}"] = v
+            rows.append(row)
+            x_rows.append(x_i)
+            y_rows.append(y_i)
+            entities.append(e)
+            times.append(t)
+    df = pd.DataFrame(rows).set_index(["entity", "time"])
+    return df, x_rows, y_rows, entities, times
+
+
+def run_panel_time_fe(n_entities: int, n_times: int, k: int, seed: int) -> dict[str, Any]:
+    """Time fixed-effects panel OLS vs linearmodels + within OLS SEs."""
+    from linearmodels.panel import PanelOLS
+
+    df, x_rows, y_rows, entities, times = _panel_dataset(n_entities, n_times, k, seed)
+    exog_cols = [f"x{j + 1}" for j in range(k)]
+    panel = PanelOLS(df["y"], df[exog_cols], time_effects=True).fit()
+
+    flat = df.reset_index()
+    dm = flat.copy()
+    for col in ["y", *exog_cols]:
+        dm[col] = flat[col] - flat.groupby("time")[col].transform("mean")
+    within = sm.OLS(dm["y"], dm[exog_cols]).fit()
+
+    return {
+        "kind": "panel_time_fe",
+        "n_entities": n_entities,
+        "n_times": n_times,
+        "k": k,
+        "seed": seed,
+        "dataset": {
+            "x": _matrix(np.asarray(x_rows, dtype=np.float64)),
+            "y": _to_list(np.asarray(y_rows, dtype=np.float64)),
+            "entities": entities,
+            "times": times,
+        },
+        "params": _to_list(np.asarray(panel.params, dtype=np.float64)),
+        "bse": _to_list(np.asarray(within.bse, dtype=np.float64)),
+        "tvalues": _to_list(np.asarray(within.tvalues, dtype=np.float64)),
+        "pvalues": _to_list(np.asarray(within.pvalues, dtype=np.float64)),
+        "rsquared": float(within.rsquared),
+    }
+
+
+def run_panel_two_way_fe(
+    n_entities: int, n_times: int, k: int, seed: int
+) -> dict[str, Any]:
+    """Two-way FE via iterative within; unbalanced by dropping a few cells."""
+    from linearmodels.panel import PanelOLS
+
+    drop = {(0, 1), (0, 2), (3, n_times - 1), (5, 0)}
+    df, x_rows, y_rows, entities, times = _panel_dataset(
+        n_entities, n_times, k, seed, drop=drop
+    )
+    exog_cols = [f"x{j + 1}" for j in range(k)]
+    panel = PanelOLS(
+        df["y"], df[exog_cols], entity_effects=True, time_effects=True
+    ).fit()
+
+    # Iterative demeaning (matches inferust / linearmodels residualization).
+    y_arr = np.asarray(y_rows, dtype=np.float64)
+    x_arr = np.asarray(x_rows, dtype=np.float64)
+    ent = np.asarray(entities)
+    tim = np.asarray(times)
+
+    def demean(z: np.ndarray, g: np.ndarray) -> np.ndarray:
+        out = z.copy()
+        for gg in np.unique(g):
+            m = g == gg
+            out[m] -= out[m].mean(axis=0)
+        return out
+
+    y_dm = y_arr.copy()
+    x_dm = x_arr.copy()
+    for _ in range(200):
+        y0, x0 = y_dm.copy(), x_dm.copy()
+        y_dm = demean(y_dm, ent)
+        x_dm = demean(x_dm, ent)
+        y_dm = demean(y_dm, tim)
+        x_dm = demean(x_dm, tim)
+        if max(np.max(np.abs(y_dm - y0)), np.max(np.abs(x_dm - x0))) < 1e-14:
+            break
+    within = sm.OLS(y_dm, x_dm).fit()
+
+    return {
+        "kind": "panel_two_way_fe",
+        "n_entities": n_entities,
+        "n_times": n_times,
+        "k": k,
+        "seed": seed,
+        "dataset": {
+            "x": _matrix(np.asarray(x_rows, dtype=np.float64)),
+            "y": _to_list(np.asarray(y_rows, dtype=np.float64)),
+            "entities": entities,
+            "times": times,
+        },
+        "params": _to_list(np.asarray(panel.params, dtype=np.float64)),
+        "bse": _to_list(np.asarray(within.bse, dtype=np.float64)),
+        "tvalues": _to_list(np.asarray(within.tvalues, dtype=np.float64)),
+        "pvalues": _to_list(np.asarray(within.pvalues, dtype=np.float64)),
+        "rsquared": float(within.rsquared),
+    }
+
+
 def emit(out_dir: Path, name: str, payload: dict[str, Any]) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / f"{name}.json"
@@ -2055,6 +2191,14 @@ def main() -> None:
 
     # Panel random effects + Hausman (0.4.0)
     emit(out, "panel_re", run_panel_re(n_entities=12, n_times=8, k=2, seed=83))
+
+    # Panel time FE / two-way FE (0.5.0)
+    emit(out, "panel_time_fe", run_panel_time_fe(n_entities=12, n_times=8, k=2, seed=84))
+    emit(
+        out,
+        "panel_two_way_fe",
+        run_panel_two_way_fe(n_entities=12, n_times=8, k=2, seed=85),
+    )
 
     print(f"\nstatsmodels version: {sm.__version__}")
 

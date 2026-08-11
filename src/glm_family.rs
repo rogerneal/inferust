@@ -14,7 +14,11 @@ pub enum GlmFamily {
     Binomial,
     Poisson,
     Gamma,
-    /// Positive continuous outcomes with inverse-Gaussian variance (dispatched via Gamma IRLS starter).
+    /// Positive continuous outcomes with inverse-Gaussian variance.
+    ///
+    /// Not implemented yet: [`Glm::fit`] returns an error for this variant.
+    /// Use a dedicated inverse-Gaussian estimator when one lands; do not treat
+    /// this as Gamma.
     InverseGaussian,
 }
 
@@ -66,10 +70,9 @@ impl Glm {
                 .with_feature_names(self.feature_names.clone())
                 .fit(x, y)
                 .map(GlmResult::Gamma),
-            GlmFamily::InverseGaussian => Gamma::new()
-                .with_feature_names(self.feature_names.clone())
-                .fit(x, y)
-                .map(GlmResult::InverseGaussian),
+            GlmFamily::InverseGaussian => Err(InferustError::InvalidInput(
+                "GlmFamily::InverseGaussian is not implemented yet; use Gamma for gamma-family outcomes, or wait for a dedicated inverse-Gaussian estimator".into(),
+            )),
         }
     }
 }

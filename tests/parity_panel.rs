@@ -1,7 +1,8 @@
-//! Parity for panel entity FE / RE and the Hausman test.
+//! Parity for panel FE / RE estimators and the Hausman test.
 //!
-//! * FE coefficients match `linearmodels.panel.PanelOLS(entity_effects=True)`.
+//! * Entity FE matches `linearmodels.panel.PanelOLS(entity_effects=True)`.
 //!   Within SEs match demean-then-OLS (inferust's path).
+//! * Time FE and two-way FE match linearmodels with the same within-OLS SEs.
 //! * RE matches `linearmodels.panel.RandomEffects` with an intercept
 //!   (`cov_type="unadjusted"`, Swamy–Arora variance components).
 //! * Hausman uses FE-within OLS covariance (same as inferust), not
@@ -12,30 +13,18 @@ mod common;
 use common::{as_f64, as_f64_vec, assert_parity, check_scalar, check_vec, load_fixture, xy};
 use inferust::panel::{hausman_fe_re, PanelOls};
 
-fn entities_from(fx: &serde_json::Value) -> Vec<usize> {
-    fx["dataset"]["entities"]
+fn ids_from(fx: &serde_json::Value, key: &str) -> Vec<usize> {
+    fx["dataset"][key]
         .as_array()
-        .expect("entities")
+        .unwrap_or_else(|| panic!("{key}"))
         .iter()
-        .map(|v| v.as_u64().expect("entity id") as usize)
+        .map(|v| v.as_u64().expect("id") as usize)
         .collect()
 }
 
-#[test]
-fn parity_panel_entity_fe() {
-    let fx = load_fixture("panel_fe");
-    let (x, y) = xy(&fx);
-    let entities = entities_from(&fx);
-    let k = x[0].len();
-    let names: Vec<String> = (1..=k).map(|i| format!("x{i}")).collect();
-
-    let result = PanelOls::new()
-        .with_feature_names(names)
-        .fit_entity_fe(&x, &y, &entities)
-        .expect("panel FE fit failed");
-
+fn check_within_ols(name: &str, result: &inferust::regression::OlsResult, fx: &serde_json::Value) {
     assert_parity(
-        "panel_fe",
+        name,
         vec![
             check_vec(
                 "params",
@@ -62,10 +51,56 @@ fn parity_panel_entity_fe() {
 }
 
 #[test]
+fn parity_panel_entity_fe() {
+    let fx = load_fixture("panel_fe");
+    let (x, y) = xy(&fx);
+    let entities = ids_from(&fx, "entities");
+    let k = x[0].len();
+    let names: Vec<String> = (1..=k).map(|i| format!("x{i}")).collect();
+
+    let result = PanelOls::new()
+        .with_feature_names(names)
+        .fit_entity_fe(&x, &y, &entities)
+        .expect("panel FE fit failed");
+    check_within_ols("panel_fe", &result, &fx);
+}
+
+#[test]
+fn parity_panel_time_fe() {
+    let fx = load_fixture("panel_time_fe");
+    let (x, y) = xy(&fx);
+    let times = ids_from(&fx, "times");
+    let k = x[0].len();
+    let names: Vec<String> = (1..=k).map(|i| format!("x{i}")).collect();
+
+    let result = PanelOls::new()
+        .with_feature_names(names)
+        .fit_time_fe(&x, &y, &times)
+        .expect("panel time FE fit failed");
+    check_within_ols("panel_time_fe", &result, &fx);
+}
+
+#[test]
+fn parity_panel_two_way_fe() {
+    let fx = load_fixture("panel_two_way_fe");
+    let (x, y) = xy(&fx);
+    let entities = ids_from(&fx, "entities");
+    let times = ids_from(&fx, "times");
+    let k = x[0].len();
+    let names: Vec<String> = (1..=k).map(|i| format!("x{i}")).collect();
+
+    let result = PanelOls::new()
+        .with_feature_names(names)
+        .fit_two_way_fe(&x, &y, &entities, &times)
+        .expect("panel two-way FE fit failed");
+    check_within_ols("panel_two_way_fe", &result, &fx);
+}
+
+#[test]
 fn parity_panel_random_effects() {
     let fx = load_fixture("panel_re");
     let (x, y) = xy(&fx);
-    let entities = entities_from(&fx);
+    let entities = ids_from(&fx, "entities");
     let k = x[0].len();
     let names: Vec<String> = (1..=k).map(|i| format!("x{i}")).collect();
 
@@ -108,7 +143,7 @@ fn parity_panel_random_effects() {
 fn parity_hausman_fe_re() {
     let fx = load_fixture("panel_re");
     let (x, y) = xy(&fx);
-    let entities = entities_from(&fx);
+    let entities = ids_from(&fx, "entities");
     let fe = PanelOls::new()
         .fit_entity_fe(&x, &y, &entities)
         .expect("FE");

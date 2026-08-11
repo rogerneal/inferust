@@ -45,7 +45,7 @@
 | `robust` | Huber robust linear regression | `statsmodels.RLM` basics |
 | `gee` | independence-working-correlation GEE starters | `statsmodels.GEE` basics |
 | `mixed` | random-intercept mixed linear model starter | `statsmodels.MixedLM` basics |
-| `panel` | entity fixed effects (within), random effects (Swamy–Arora), and Hausman FE vs RE test | `linearmodels.panel.PanelOLS`, `RandomEffects` |
+| `panel` | entity FE, time FE, two-way FE, random effects (Swamy–Arora), and Hausman FE vs RE | `linearmodels.panel.PanelOLS`, `RandomEffects` |
 | `correlation` | Pearson, Spearman, full correlation matrix | `df.corr()` |
 
 ---
@@ -209,6 +209,23 @@ let ordered = OrderedLogit::new().fit(&x, &ordinal_y).unwrap();
 let category_probabilities = ordered.predict_proba(&x);
 
 let zip = ZeroInflatedPoisson::new().fit(&x, &counts, &inflation_x).unwrap();
+```
+
+### Panel fixed and random effects
+
+```rust
+use inferust::panel::{hausman_fe_re, PanelOls};
+
+// entity FE / time FE / two-way FE (no intercept; effects absorbed)
+let fe = PanelOls::new().fit_entity_fe(&x, &y, &entities).unwrap();
+let tfe = PanelOls::new().fit_time_fe(&x, &y, &times).unwrap();
+let tw = PanelOls::new()
+    .fit_two_way_fe(&x, &y, &entities, &times)
+    .unwrap();
+
+// Swamy–Arora RE (intercept first), then Hausman FE vs RE
+let re = PanelOls::new().fit_random_effects(&x, &y, &entities).unwrap();
+let hausman = hausman_fe_re(&fe, &re).unwrap();
 ```
 
 ```rust
@@ -537,14 +554,15 @@ match result {
 Ordered roughly by priority. The parity gaps are tracked in more detail under
 "Future work" in [docs/parity.md](docs/parity.md).
 
-- [ ] Panel time FE and two-way FE
-- [ ] Binomial and Gamma dispatch through the generic `glm_family` front-end, plus bse/llf/deviance
 - [ ] Fuller output sets for the `gee`, `mixed`, and `robust` fixtures, which currently pin only headline coefficients
 - [ ] Parity fixtures for `gam`, `gmm`, `imputation`, and `treatment`
 - [ ] Numerical parity for `Sarimax`, `Vecm`, and `Varmax`
+- [ ] Real `GlmFamily::InverseGaussian` estimator (currently errors at fit)
 
 ### Shipped
 
+- [x] Panel time FE and two-way FE (iterative within)
+- [x] `glm_family` Binomial and Gamma front-end parity (params/bse/llf)
 - [x] Panel entity random effects (Swamy–Arora) and Hausman FE vs RE test
 - [x] PCA and one-way MANOVA parity against statsmodels (Rao F for Wilks' λ)
 - [x] Panel entity fixed-effects parity against linearmodels / within OLS

@@ -1,7 +1,8 @@
 //! Panel-data estimators.
 //!
-//! Currently supports entity fixed effects (within) and random effects
-//! (Swamy–Arora / GLS quasi-demeaning), plus a Hausman test comparing the two.
+//! Supports entity fixed effects (within), time fixed effects, two-way fixed
+//! effects (iterative within), random effects (Swamy–Arora / GLS
+//! quasi-demeaning), and a Hausman test comparing entity FE to RE.
 
 use std::collections::BTreeMap;
 
@@ -11,7 +12,7 @@ use statrs::distribution::{ChiSquared, ContinuousCDF};
 use crate::error::{InferustError, Result};
 use crate::regression::{Ols, OlsResult};
 
-/// One-way panel OLS builder (entity FE and RE).
+/// Panel OLS builder (entity / time / two-way FE and entity RE).
 #[derive(Debug, Clone)]
 pub struct PanelOls {
     feature_names: Vec<String>,
@@ -47,6 +48,37 @@ impl PanelOls {
         entities: &[usize],
     ) -> Result<OlsResult> {
         let (x_dm, y_dm) = within_transform(x, y, entities)?;
+        Ols::new()
+            .with_feature_names(self.feature_names.clone())
+            .no_intercept()
+            .fit(&x_dm, &y_dm)
+    }
+
+    /// Fit `y ~ x` with time fixed effects removed by within transformation.
+    ///
+    /// Same SE convention as [`Self::fit_entity_fe`]: demean-then-OLS, not the
+    /// linearmodels within-df correction.
+    pub fn fit_time_fe(&self, x: &[Vec<f64>], y: &[f64], times: &[usize]) -> Result<OlsResult> {
+        let (x_dm, y_dm) = within_transform(x, y, times)?;
+        Ols::new()
+            .with_feature_names(self.feature_names.clone())
+            .no_intercept()
+            .fit(&x_dm, &y_dm)
+    }
+
+    /// Fit `y ~ x` with entity and time fixed effects via iterative within.
+    ///
+    /// Alternating entity/time demeaning matches `linearmodels.panel.PanelOLS`
+    /// with `entity_effects=True, time_effects=True` on balanced and unbalanced
+    /// panels. Standard errors are demean-then-OLS (no within-df correction).
+    pub fn fit_two_way_fe(
+        &self,
+        x: &[Vec<f64>],
+        y: &[f64],
+        entities: &[usize],
+        times: &[usize],
+    ) -> Result<OlsResult> {
+        let (x_dm, y_dm) = two_way_within_transform(x, y, entities, times)?;
         Ols::new()
             .with_feature_names(self.feature_names.clone())
             .no_intercept()
@@ -354,14 +386,14 @@ pub fn two_way_cluster_ids(entities: &[usize], times: &[usize]) -> Vec<usize> {
 fn validate_panel<'a>(
     x: &'a [Vec<f64>],
     y: &'a [f64],
-    entities: &'a [usize],
+    groups_ids: &'a [usize],
 ) -> Result<(BTreeMap<usize, Vec<usize>>, usize)> {
     if y.is_empty() {
         return Err(InferustError::InsufficientData { needed: 1, got: 0 });
     }
-    if entities.len() != y.len() || x.len() != y.len() {
+    if groups_ids.len() != y.len() || x.len() != y.len() {
         return Err(InferustError::DimensionMismatch {
-            x_rows: x.len().max(entities.len()),
+            x_rows: x.len().max(groups_ids.len()),
             y_len: y.len(),
         });
     }
@@ -384,7 +416,7 @@ fn validate_panel<'a>(
         ));
     }
     let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-    for (i, &e) in entities.iter().enumerate() {
+    for (i, &e) in groups_ids.iter().enumerate() {
         groups.entry(e).or_default().push(i);
     }
     if groups.len() < 2 {
@@ -396,28 +428,85 @@ fn validate_panel<'a>(
     Ok((groups, p))
 }
 
-fn within_transform(
-    x: &[Vec<f64>],
-    y: &[f64],
-    entities: &[usize],
-) -> Result<(Vec<Vec<f64>>, Vec<f64>)> {
-    let (groups, p) = validate_panel(x, y, entities)?;
-    let mut y_dm = y.to_vec();
-    let mut x_dm = x.to_vec();
+fn demean_inplace(x: &mut [Vec<f64>], y: &mut [f64], groups: &BTreeMap<usize, Vec<usize>>) {
+    let p = if x.is_empty() { 0 } else { x[0].len() };
     for idx in groups.values() {
         let n_i = idx.len() as f64;
         let mean_y: f64 = idx.iter().map(|&i| y[i]).sum::<f64>() / n_i;
         for &i in idx {
-            y_dm[i] -= mean_y;
+            y[i] -= mean_y;
         }
-        for j in 0..p {
-            let mean_x: f64 = idx.iter().map(|&i| x[i][j]).sum::<f64>() / n_i;
-            for &i in idx {
-                x_dm[i][j] -= mean_x;
+        let mut mean_x = vec![0.0; p];
+        for &i in idx {
+            for (m, v) in mean_x.iter_mut().zip(x[i].iter()) {
+                *m += v;
+            }
+        }
+        for m in &mut mean_x {
+            *m /= n_i;
+        }
+        for &i in idx {
+            for (v, m) in x[i].iter_mut().zip(mean_x.iter()) {
+                *v -= m;
             }
         }
     }
+}
+
+fn within_transform(
+    x: &[Vec<f64>],
+    y: &[f64],
+    groups_ids: &[usize],
+) -> Result<(Vec<Vec<f64>>, Vec<f64>)> {
+    let (groups, _) = validate_panel(x, y, groups_ids)?;
+    let mut y_dm = y.to_vec();
+    let mut x_dm = x.to_vec();
+    demean_inplace(&mut x_dm, &mut y_dm, &groups);
     Ok((x_dm, y_dm))
+}
+
+/// Iterative entity + time demeaning (method of alternating projections).
+fn two_way_within_transform(
+    x: &[Vec<f64>],
+    y: &[f64],
+    entities: &[usize],
+    times: &[usize],
+) -> Result<(Vec<Vec<f64>>, Vec<f64>)> {
+    if times.len() != y.len() {
+        return Err(InferustError::DimensionMismatch {
+            x_rows: times.len(),
+            y_len: y.len(),
+        });
+    }
+    let (entity_groups, _) = validate_panel(x, y, entities)?;
+    let (time_groups, _) = validate_panel(x, y, times)?;
+    let mut y_dm = y.to_vec();
+    let mut x_dm = x.to_vec();
+
+    const MAX_ITERS: usize = 200;
+    const TOL: f64 = 1e-14;
+    for _ in 0..MAX_ITERS {
+        let y_prev = y_dm.clone();
+        let x_prev = x_dm.clone();
+        demean_inplace(&mut x_dm, &mut y_dm, &entity_groups);
+        demean_inplace(&mut x_dm, &mut y_dm, &time_groups);
+
+        let mut max_delta = 0.0_f64;
+        for (a, b) in y_dm.iter().zip(y_prev.iter()) {
+            max_delta = max_delta.max((a - b).abs());
+        }
+        for (row_a, row_b) in x_dm.iter().zip(x_prev.iter()) {
+            for (a, b) in row_a.iter().zip(row_b.iter()) {
+                max_delta = max_delta.max((a - b).abs());
+            }
+        }
+        if max_delta < TOL {
+            return Ok((x_dm, y_dm));
+        }
+    }
+    Err(InferustError::InvalidInput(
+        "two-way within transform failed to converge".into(),
+    ))
 }
 
 #[cfg(test)]
@@ -466,5 +555,18 @@ mod tests {
         assert_eq!(h.df, 2);
         assert!(h.statistic.is_finite());
         assert!((0.0..=1.0).contains(&h.p_value));
+    }
+
+    #[test]
+    fn time_and_two_way_fe_run() {
+        let (x, y, entities) = toy_panel();
+        let times: Vec<usize> = (0..12).map(|i| i % 3).collect();
+        let tfe = PanelOls::new().fit_time_fe(&x, &y, &times).unwrap();
+        assert_eq!(tfe.coefficients.len(), 2);
+        let tw = PanelOls::new()
+            .fit_two_way_fe(&x, &y, &entities, &times)
+            .unwrap();
+        assert_eq!(tw.coefficients.len(), 2);
+        assert!(tw.std_errors.iter().all(|s| s.is_finite() && *s >= 0.0));
     }
 }
