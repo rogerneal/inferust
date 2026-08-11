@@ -41,10 +41,17 @@ pub struct KalmanLikelihood {
 }
 
 impl LinearGaussianModel {
-    /// Build an ARMA(p, q) state-space representation with intercept `mu`.
+    /// Build an ARMA(p, q) state-space representation with unconditional mean `mu`.
     ///
-    /// Uses the companion-form parameterisation with state dimension
-    /// `m = max(p, q + 1)` (Hamilton / Harvey).
+    /// Uses the Hamilton companion form that matches statsmodels SARIMAX
+    /// (`hamilton_representation=True`, and the default Harvey form's likelihood):
+    /// state dimension `m = max(p, q + 1)`, design `Z = [1, θ₁, …, θ_{m-1}]`
+    /// (MA in the observation equation), companion transition `T` carrying the
+    /// AR coefficients, selection `R = e₁`, `H = 0`, and `Q = σ²`.
+    ///
+    /// `mu` is the unconditional mean placed in the observation intercept
+    /// (statsmodels `trend='c'` / `const`). The regression intercept
+    /// `c = μ (1 − Σφ)` used by CSS forecasting is recovered separately.
     pub fn arma(mu: f64, ar: &[f64], ma: &[f64], sigma2: f64) -> Result<Self> {
         if sigma2 <= 0.0 || !sigma2.is_finite() {
             return Err(InferustError::InvalidInput(
@@ -55,6 +62,7 @@ impl LinearGaussianModel {
         let q = ma.len();
         let m = p.max(q + 1).max(1);
 
+        // Companion T (Hamilton): first row = φ, subdiagonal = 1.
         let mut transition = DMatrix::zeros(m, m);
         for i in 1..m {
             transition[(i, i - 1)] = 1.0;
@@ -62,17 +70,19 @@ impl LinearGaussianModel {
         for (i, &phi) in ar.iter().enumerate() {
             transition[(0, i)] = phi;
         }
+
+        // Z carries MA coefficients: [1, θ₁, …, θ_{m-1}].
+        let mut design = DMatrix::zeros(1, m);
+        design[(0, 0)] = 1.0;
         for (j, &theta) in ma.iter().enumerate() {
             if j + 1 < m {
-                transition[(0, j + 1)] = theta;
+                design[(0, j + 1)] = theta;
             }
         }
 
+        // R = e₁ (not Z'); H = 0; Q = σ².
         let mut selection = DMatrix::zeros(m, 1);
         selection[(0, 0)] = 1.0;
-
-        let mut design = DMatrix::zeros(1, m);
-        design[(0, 0)] = 1.0;
 
         let initial_state = DVector::zeros(m);
         let initial_cov = stationary_covariance(&transition, &selection, sigma2, m)?;
@@ -182,6 +192,20 @@ mod tests {
         let result = model.filter(&y).unwrap();
         assert!(result.log_likelihood.is_finite());
         assert!(result.log_likelihood < 0.0);
+    }
+
+    #[test]
+    fn arma11_hamilton_matrices() {
+        let model = LinearGaussianModel::arma(0.0, &[0.6], &[0.3], 1.0).unwrap();
+        // Z = [1, θ], T = [[φ, 0], [1, 0]], R = [1, 0]'
+        assert!((model.design[(0, 0)] - 1.0).abs() < 1e-15);
+        assert!((model.design[(0, 1)] - 0.3).abs() < 1e-15);
+        assert!((model.transition[(0, 0)] - 0.6).abs() < 1e-15);
+        assert!((model.transition[(0, 1)] - 0.0).abs() < 1e-15);
+        assert!((model.transition[(1, 0)] - 1.0).abs() < 1e-15);
+        assert!((model.selection[(0, 0)] - 1.0).abs() < 1e-15);
+        assert!((model.selection[(1, 0)] - 0.0).abs() < 1e-15);
+        assert_eq!(model.obs_variance, 0.0);
     }
 
     #[test]

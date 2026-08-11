@@ -486,24 +486,76 @@ def run_tukey_hsd(seed: int) -> dict[str, Any]:
     }
 
 
+def dataset_arma11(n: int, phi: float, theta: float, seed: int) -> np.ndarray:
+    """Stationary ARMA(1,1) with unconditional mean 5.0."""
+    rng = _lcg(seed)
+    c = 5.0 * (1.0 - phi)
+    y = np.empty(n, dtype=np.float64)
+    eps_prev = 0.0
+    y[0] = 5.0 + rng.standard_normal()
+    for t in range(1, n):
+        eps = rng.standard_normal()
+        y[t] = c + phi * y[t - 1] + eps + theta * eps_prev
+        eps_prev = eps
+    return y
+
+
 def run_arima(n: int, phi: float, seed: int) -> dict[str, Any]:
     y = dataset_ar1(n, phi, seed)
-    # statsmodels' Arima uses MLE by default; inferust uses CSS for q==0 (just
-    # AR), so we fit a pure AR(1) in statsmodels via conditional sum of squares
-    # to keep estimators comparable.
     from statsmodels.tsa.arima.model import ARIMA
 
     model = ARIMA(y, order=(1, 0, 0), trend="c")
     res = model.fit(method="statespace")
     params = {str(name): float(val) for name, val in zip(res.param_names, np.asarray(res.params))}
+    # Filter-only llf at the fitted params (exact Kalman surface check).
+    filter_params = [params["const"], params["ar.L1"], params["sigma2"]]
+    filter_llf = float(model.filter(filter_params).llf)
     return {
         "kind": "arima_ar1",
         "dataset": {"n": n, "phi": phi, "seed": seed, "y": _to_list(y)},
         "params": params,
         "sigma2": float(params.get("sigma2", float("nan"))),
         "llf": float(res.llf),
+        "filter_llf": filter_llf,
         "aic": float(res.aic),
         "bic": float(res.bic),
+        "estimator": "ARIMA.fit(method='statespace') trend='c'",
+    }
+
+
+def run_arima_arma11(
+    n: int = 300, phi: float = 0.5, theta: float = 0.4, seed: int = 61
+) -> dict[str, Any]:
+    """ARIMA(1,0,1) statespace MLE fixture (trend='c' → const = μ)."""
+    y = dataset_arma11(n, phi, theta, seed)
+    from statsmodels.tsa.arima.model import ARIMA
+
+    model = ARIMA(y, order=(1, 0, 1), trend="c")
+    res = model.fit(method="statespace")
+    params = {str(name): float(val) for name, val in zip(res.param_names, np.asarray(res.params))}
+    filter_params = [
+        params["const"],
+        params["ar.L1"],
+        params["ma.L1"],
+        params["sigma2"],
+    ]
+    filter_llf = float(model.filter(filter_params).llf)
+    return {
+        "kind": "arima_arma11",
+        "dataset": {
+            "n": n,
+            "phi": phi,
+            "theta": theta,
+            "seed": seed,
+            "y": _to_list(y),
+        },
+        "params": params,
+        "sigma2": float(params.get("sigma2", float("nan"))),
+        "llf": float(res.llf),
+        "filter_llf": filter_llf,
+        "aic": float(res.aic),
+        "bic": float(res.bic),
+        "estimator": "ARIMA.fit(method='statespace') trend='c'",
     }
 
 
@@ -1809,8 +1861,9 @@ def run_panel_fe(n_entities: int, n_times: int, k: int, seed: int) -> dict[str, 
     Coefficients are validated against ``linearmodels.panel.PanelOLS`` with
     ``entity_effects=True``. Standard errors are from statsmodels OLS on the
     same within-transformed data (no intercept), which matches inferust's
-    demean-then-``Ols::no_intercept`` implementation. linearmodels applies an
-    extra within-df correction to SEs, so those are not used here.
+    default demean-then-``Ols::no_intercept`` path. ``bse_within_df`` stores the
+    absorbed-FE df correction (``SSR / (n - k - n_entities)``), matching
+    ``PanelOls::within_df(true)`` / linearmodels unadjusted SEs.
     """
     from linearmodels.panel import PanelOLS
     import pandas as pd
@@ -1842,12 +1895,19 @@ def run_panel_fe(n_entities: int, n_times: int, k: int, seed: int) -> dict[str, 
     exog_cols = [f"x{j + 1}" for j in range(k)]
     panel = PanelOLS(df["y"], df[exog_cols], entity_effects=True).fit()
 
-    # Within SEs via demean + OLS (matches inferust).
+    # Within SEs via demean + OLS (matches inferust default).
     flat = df.reset_index()
     dm = flat.copy()
     for col in ["y", *exog_cols]:
         dm[col] = flat[col] - flat.groupby("entity")[col].transform("mean")
     within = sm.OLS(dm["y"], dm[exog_cols]).fit()
+    n = len(y_rows)
+    df_ols = n - k
+    df_within = max(n - k - n_entities, 1)
+    scale = (df_ols / df_within) ** 0.5
+    bse_within = np.asarray(within.bse, dtype=np.float64)
+    bse_within_df = bse_within * scale
+    t_within_df = np.asarray(within.params, dtype=np.float64) / bse_within_df
 
     return {
         "kind": "panel_fe",
@@ -1861,8 +1921,10 @@ def run_panel_fe(n_entities: int, n_times: int, k: int, seed: int) -> dict[str, 
             "entities": entities,
         },
         "params": _to_list(np.asarray(panel.params, dtype=np.float64)),
-        "bse": _to_list(np.asarray(within.bse, dtype=np.float64)),
+        "bse": _to_list(bse_within),
+        "bse_within_df": _to_list(bse_within_df),
         "tvalues": _to_list(np.asarray(within.tvalues, dtype=np.float64)),
+        "tvalues_within_df": _to_list(t_within_df),
         "pvalues": _to_list(np.asarray(within.pvalues, dtype=np.float64)),
         "rsquared": float(within.rsquared),
     }
@@ -2116,6 +2178,67 @@ def run_panel_two_way_fe(
     }
 
 
+def run_mixed(n_groups: int = 6, n_per: int = 20, k: int = 2, seed: int = 50) -> dict[str, Any]:
+    """Random-intercept MixedLM (REML) reference for ``MixedLinearModel``.
+
+    Dataset is ``dataset_linear``-style (all X draws, then eps) with artificial
+    group labels; true RE variance is zero so REML sits near the boundary.
+    Uses Powell (reliable at the boundary); default L-BFGS often fails to
+    converge on this design.
+    """
+    n = n_groups * n_per
+    rng = _lcg(seed)
+    x = np.empty((n, k), dtype=np.float64)
+    for i in range(n):
+        for j in range(k):
+            x[i, j] = rng.standard_normal()
+    eps = np.array([rng.standard_normal() * 0.5 for _ in range(n)])
+    beta = np.array([(j + 1) / k for j in range(k)], dtype=np.float64)
+    y = 1.0 + x @ beta + eps
+    groups = np.repeat(np.arange(n_groups), n_per)
+    xc = sm.add_constant(x, has_constant="add")
+    fit = sm.MixedLM(y, xc, groups=groups).fit(reml=True, method="powell", disp=False)
+    cov_re = float(np.asarray(fit.cov_re, dtype=np.float64).ravel()[0])
+    return {
+        "kind": "mixed_small",
+        "dataset": {
+            "x": _matrix(x),
+            "y": _to_list(y),
+            "groups": [int(g) for g in groups],
+            "n": n,
+            "k": k,
+            "seed": seed,
+            "n_groups": n_groups,
+            "n_per": n_per,
+        },
+        "params": _to_list(np.asarray(fit.fe_params, dtype=np.float64)),
+        "bse": _to_list(np.asarray(fit.bse_fe, dtype=np.float64)),
+        "tvalues": _to_list(
+            np.asarray(fit.fe_params, dtype=np.float64)
+            / np.asarray(fit.bse_fe, dtype=np.float64)
+        ),
+        "pvalues": _to_list(np.asarray(fit.pvalues[: k + 1], dtype=np.float64)),
+        "var_random": cov_re,
+        "var_residual": float(fit.scale),
+        "llf": float(fit.llf),
+    }
+
+
+def run_robust(n: int = 100, k: int = 2, seed: int = 51) -> dict[str, Any]:
+    """Huber RLM reference for ``RobustLinearModel`` (default ``cov='H1'``)."""
+    x, y = dataset_linear(n, k, seed)
+    xc = sm.add_constant(x, has_constant="add")
+    res = sm.RLM(y, xc, M=sm.robust.norms.HuberT()).fit()
+    return {
+        "kind": "robust_lm",
+        "dataset": {"n": n, "k": k, "seed": seed, **_xy_payload(x, y)},
+        "params": _to_list(res.params),
+        "bse": _to_list(res.bse),
+        "tvalues": _to_list(res.tvalues),
+        "pvalues": _to_list(res.pvalues),
+    }
+
+
 # ── GAM / GMM / imputation / treatment / SARIMAX / VECM / VARMAX ─────────────
 
 
@@ -2149,6 +2272,114 @@ def run_gam(n: int = 60, seed: int = 100) -> dict[str, Any]:
         "params": _to_list(res.params),
         "bse": _to_list(res.bse),
         "rsquared": float(res.rsquared),
+    }
+
+
+def _gam_truncated_power_design(
+    x: np.ndarray, knots: list[float], degree: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build truncated-power design + diagonal penalty mask (matches ``src/gam.rs``).
+
+    Columns: powers 1..=degree (unpenalized), then (x-knot)_+^degree (penalized).
+    Returns ``(design_without_intercept, knot_penalty_bools)``.
+    """
+    cols: list[np.ndarray] = []
+    knot_penalty: list[bool] = []
+    for p in range(1, degree + 1):
+        cols.append(x[:, 0] ** p)
+        knot_penalty.append(False)
+    for knot in knots:
+        cols.append(np.maximum(x[:, 0] - knot, 0.0) ** degree)
+        knot_penalty.append(True)
+    return np.column_stack(cols), np.asarray(knot_penalty, dtype=bool)
+
+
+def _gam_gcv_lambda_grid(
+    log10_min: float = -8.0, log10_max: float = 8.0, n: int = 81
+) -> np.ndarray:
+    """Log₁₀-spaced λ grid shared with ``src/gam.rs`` GCV search."""
+    return np.logspace(log10_min, log10_max, n, dtype=np.float64)
+
+
+def _gam_penalized_fit(
+    xc: np.ndarray, y: np.ndarray, penalty_diag: np.ndarray, lam: float
+) -> tuple[np.ndarray, float, float]:
+    """Solve (X'X + λP)β = X'y; return β, edf=tr(H), SSR."""
+    xtx = xc.T @ xc
+    xty = xc.T @ y
+    a = xtx + lam * np.diag(penalty_diag)
+    a_inv = np.linalg.inv(a)
+    beta = a_inv @ xty
+    # edf = tr(A^{-1} X'X)
+    edf = float(np.trace(a_inv @ xtx))
+    resid = y - xc @ beta
+    ssr = float(resid @ resid)
+    return beta, edf, ssr
+
+
+def run_gam_penalized_gcv(n: int = 60, seed: int = 110) -> dict[str, Any]:
+    """Penalized truncated-power GAM with GCV λ (same design/grid as ``src/gam.rs``).
+
+    Prefer this over statsmodels ``GLMGam``: different bases make param pinning
+    unreliable. Penalty is identity on knot columns only; intercept and
+    polynomial basis columns are unpenalized.
+    """
+    x = np.array([[i / 10.0] for i in range(n)], dtype=np.float64)
+    rng = _lcg(seed)
+    # Nonlinear signal that benefits from several knot columns + shrinkage.
+    signal = np.sin(0.8 * x[:, 0]) + 0.3 * x[:, 0]
+    y = signal + np.array([0.35 * rng.standard_normal() for _ in range(n)])
+
+    degree = 3
+    knots = [1.0, 2.0, 3.0, 4.0]
+    design, knot_penalty = _gam_truncated_power_design(x, knots, degree)
+    xc = sm.add_constant(design, has_constant="add")
+    # Intercept unpenalized; then mirror knot_penalty for non-intercept columns.
+    penalty_diag = np.concatenate([[0.0], knot_penalty.astype(np.float64)])
+
+    best: dict[str, Any] | None = None
+    for lam in _gam_gcv_lambda_grid():
+        try:
+            beta, edf, ssr = _gam_penalized_fit(xc, y, penalty_diag, float(lam))
+        except np.linalg.LinAlgError:
+            continue
+        if not np.isfinite(edf) or not np.isfinite(ssr) or edf >= n - 1e-8:
+            continue
+        denom = n - edf
+        if denom <= 1e-12:
+            continue
+        gcv = float(n * ssr / (denom * denom))
+        if not np.isfinite(gcv):
+            continue
+        if best is None or gcv < best["gcv"]:
+            best = {
+                "lambda": float(lam),
+                "edf": edf,
+                "gcv": gcv,
+                "ssr": ssr,
+                "params": beta,
+            }
+    if best is None:
+        raise RuntimeError("GCV search failed for gam_penalized_gcv")
+
+    return {
+        "kind": "gam_penalized_gcv",
+        "dataset": {
+            "n": n,
+            "seed": seed,
+            "knots": knots,
+            "degree": degree,
+            "linear_columns": [],
+            "gcv_log10_lambda_min": -8.0,
+            "gcv_log10_lambda_max": 8.0,
+            "gcv_n_lambdas": 81,
+            **_xy_payload(x, y),
+        },
+        "params": _to_list(best["params"]),
+        "lambda": best["lambda"],
+        "edf": best["edf"],
+        "gcv": best["gcv"],
+        "ssr": best["ssr"],
     }
 
 
@@ -2557,6 +2788,7 @@ def main() -> None:
 
     # Time series
     emit(out, "arima_ar1", run_arima(n=300, phi=0.6, seed=6))
+    emit(out, "arima_arma11", run_arima_arma11(n=300, phi=0.5, theta=0.4, seed=61))
     emit(out, "acf_pacf", run_acf_pacf(n=300, phi=0.5, seed=7, lags=10))
     emit(out, "adf", run_adf(n=300, phi=0.5, seed=7))
 
@@ -2645,8 +2877,13 @@ def main() -> None:
         run_panel_two_way_fe(n_entities=12, n_times=8, k=2, seed=85),
     )
 
+    # Mixed LM / robust LM
+    emit(out, "mixed_small", run_mixed(n_groups=6, n_per=20, k=2, seed=50))
+    emit(out, "robust_small", run_robust(n=100, k=2, seed=51))
+
     # GAM / GMM / imputation / treatment / SARIMAX / VECM / VARMAX
     emit(out, "gam_small", run_gam(n=60, seed=100))
+    emit(out, "gam_penalized_gcv", run_gam_penalized_gcv(n=60, seed=110))
     emit(out, "iv2sls_small", run_iv2sls(n=80, seed=101))
     emit(out, "imputation_mice_small", run_imputation_mice())
     emit(out, "treatment_ipw_small", run_treatment_ipw(n=80, seed=102))

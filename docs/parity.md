@@ -49,7 +49,9 @@ suite.
 | ACF / Ljung-Box | `1e-8` to `1e-10` | Closed form. |
 | PACF (Yule-Walker vs OLS-AR) | `1e-10` | Default `pacf()` uses YWM/Durbin-Levinson; OLS-AR available via `PacfMethod::Ols`. |
 | ADF t-statistic | `1e-7` | Both fit the same regression; should be tight. |
-| ARIMA params | (no strict parity) | inferust uses CSS, statsmodels uses MLE/statespace. Tested for plausibility only. |
+| ARIMA CSS params | (plausibility) | Default CSS estimator vs statsmodels statespace MLE; loose bounds only. |
+| ARIMA ExactMle (`.exact_mle()`) params / llf / σ² | `1e-3` / `1e-2` / `5e-3` | Kalman Hamilton form vs `ARIMA.fit(method='statespace')`; mean compared as μ = c/(1−Σφ). |
+| ARIMA ExactMle filter llf at fixed params | `1e-8` | Same state-space likelihood surface as statsmodels SARIMAX/ARIMA filter. |
 | Hypothesis tests (t, ANOVA, chi-square, MW) | `1e-9` to `1e-10` | Closed form. p-values rely on `statrs` vs `scipy` distribution implementations; small drift expected. |
 | Multiple-testing corrections (Bonferroni, Holm, BH, BY) | `1e-10` to `1e-12` | Direct closed-form formulas; matches `statsmodels.stats.multitest.multipletests` bit-for-bit in practice. |
 | Tukey HSD mean_diff, std_error | `1e-6` | Closed form (Tukey-Kramer SE). |
@@ -96,7 +98,9 @@ modules that have at least one parity fixture today; modules listed under
 | `glm` | `poisson_small` | `Poisson` | params, bse, z, p, llf, llnull, AIC, BIC, fitted | passing |
 | `time_series` | `acf_pacf` | `acf`, `pacf`, `ljung_box` | full vectors plus per-lag Q stat & p-value | passing |
 | `time_series` | `adf` | `adf_test` | t-statistic | passing |
-| `time_series` | `arima_ar1` | `Arima(1,0,0)` | implied mean & phi within 0.05 / 0.5 | structural-only |
+| `time_series` | `arima_ar1` | `Arima(1,0,0)` CSS | implied mean & phi within 0.05 / 0.5 | structural-only |
+| `time_series` | `arima_ar1` | `Arima::exact_mle` | params/llf/σ² + filter llf | passing |
+| `time_series` | `arima_arma11` | `Arima::exact_mle` | params/llf/σ² + filter llf | passing |
 | `hypothesis` | `ttest_1samp` | `ttest::one_sample` | statistic, p, df, mean_diff, CI | passing |
 | `hypothesis` | `ttest_ind` | `ttest::two_sample` (Welch) | statistic, p, df | passing |
 | `hypothesis` | `anova_oneway` | `anova::one_way` | F, p | passing |
@@ -160,6 +164,7 @@ modules that have at least one parity fixture today; modules listed under
 | `panel` | `panel_two_way_fe` | `PanelOls::fit_two_way_fe` | params (vs linearmodels), iterative-within bse/t/p/R² | passing |
 | `panel` | `panel_re` | `PanelOls::fit_random_effects`, `hausman_fe_re` | RE params/bse/σ²/θ (vs linearmodels), Hausman χ² (vs within-OLS cov) | passing |
 | `gam` | `gam_small` | `GaussianGam` (cubic truncated-power, knot 2.0) | params, bse, R² | passing |
+| `gam` | `gam_penalized_gcv` | `GaussianGam::penalized` (same truncated-power design + log₁₀ λ GCV grid as Rust; not GLMGam) | params, λ, edf, GCV, SSR | passing |
 | `gmm` | `iv2sls_small` | `Iv2Sls` | params, bse, SSR, R² | passing |
 | `imputation` | `imputation_mice_small` | `MiceImputer` | column_means, mean_impute data, fit_transform (iters=3) | passing |
 | `treatment` | `treatment_ipw_small` | `PropensityScore::ipw` | propensity params/scores, ATE, ATT | passing |
@@ -171,12 +176,13 @@ modules that have at least one parity fixture today; modules listed under
 
 These differences are documented intentionally rather than treated as bugs:
 
-- **ARIMA(p,d,q) for q > 0** -  statsmodels uses MLE on the statespace
-  representation; inferust uses conditional-sum-of-squares with a gradient
-  optimizer for q > 0 and OLS-AR for q == 0. The two estimators are
-  asymptotically equivalent but diverge on small samples and on highly
-  near-non-stationary series. *Fix:* implement a Kalman-filter exact-likelihood
-  estimator (the `statespace` module already has the scalar case).
+- **ARIMA ExactMle** -  opt-in via `Arima::exact_mle()` / `ArimaMethod::ExactMle`
+  (default remains CSS). Uses a Hamilton companion state-space form matching
+  statsmodels SARIMAX filter likelihood (`Z` carries MA, companion `T` has AR,
+  `R = e₁`, `H = 0`, `Q = σ²`). Audited for ARIMA(1,0,0) and ARIMA(1,0,1)
+  against `trend='c'` fixtures (`const` = unconditional mean μ; inferust stores
+  regression intercept `c` and converts μ = c/(1−Σφ)). Filter-only llf at fixed
+  params agrees to ~`1e-8`; fitted params/llf use practical optimizer tolerances.
 - **PACF** -  `pacf()` defaults to Yule-Walker (`method="ywm"`). Use `pacf_with_method(..., PacfMethod::Ols)` for the legacy OLS-AR partial coefficients.
 - **Mann-Whitney U sign convention** -  inferust returns `min(U1, U2)`; scipy
   returns `U1` by default. The two-sided p-value is identical; only the U

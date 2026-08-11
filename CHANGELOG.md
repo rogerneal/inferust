@@ -2,6 +2,31 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.7.0] - 2026-08-11
+
+### Added
+
+- **ARIMA exact Kalman MLE** - `.exact_mle()` uses a Hamilton-form state-space
+  likelihood matching statsmodels SARIMAX filter; L-BFGS with CSS/OLS warm
+  start. CSS remains the default. Parity for ARIMA(1,0,0) and ARIMA(1,0,1).
+- **Panel SE options** - `PanelOls::within_df(true)` rescales classical SEs to
+  absorbed-FE degrees of freedom; `.cluster_entity()` / `.cluster(groups)` wire
+  demean-then-cluster-robust OLS. Defaults stay demean-then-OLS.
+- **Penalized GAM + GCV** - `GaussianGam::penalized()` / `.smoothing(None|Some(λ))`
+  with truncated-power knot penalties and GCV λ selection. Unpenalized OLS
+  remains the default.
+
+### Fixed
+
+- **Mixed REML** - exact random-intercept REML log-likelihood after EM, with
+  profile polish for variance components; parity pins params/bse/VC/llf.
+- **Robust sandwich SEs** - Huber asymptotic covariance matches statsmodels RLM
+  `cov='H1'` / `bcov_scaled`, so fixture `bse` is pinned.
+
+### Notes
+
+- SARIMAX / VARMAX full statespace MLE and VECM β/α/Γ remain future work.
+
 ## [0.6.0] - 2026-08-11
 
 ### Added
@@ -13,8 +38,7 @@ All notable changes to `inferust` are documented here. This project follows sema
   `MiceImputer`, `PropensityScore::ipw`, `Sarimax` (exog OLS), `Vecm`
   (Johansen eigenvalues/trace), and `Varmax` (per-equation OLS).
 - **Fuller GEE surfaces** - z/p/rho for GEE Poisson alongside params/bse.
-  Robust keeps RLM params parity (sandwich SEs use a different convention than
-  RLM.bse). Mixed keeps params/bse (REML llf is not comparable to MixedLM.llf).
+  Robust and mixed inference polish (RLM H1 sandwich; exact REML) land in 0.7.0.
 
 ### Notes
 

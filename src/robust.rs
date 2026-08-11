@@ -1,5 +1,5 @@
-use nalgebra::{DMatrix, DVector};
-use statrs::distribution::{ContinuousCDF, StudentsT};
+use nalgebra::DMatrix;
+use statrs::distribution::{ContinuousCDF, Normal};
 
 use crate::error::{InferustError, Result};
 use crate::regression::{OlsResult, Wls};
@@ -14,13 +14,12 @@ pub struct RobustLinearResult {
     pub fit: OlsResult,
     pub weights: Vec<f64>,
     pub iterations: usize,
-    /// Sandwich (HC) standard errors — robust to heteroskedasticity and
-    /// influential observations.  These reflect the M-estimator's actual
-    /// variance rather than the homoskedastic WLS assumption in `fit.std_errors`.
+    /// Sandwich (HC) standard errors matching statsmodels RLM `cov='H1'`
+    /// (`bcov_scaled` / `bse`).
     pub robust_std_errors: Vec<f64>,
-    /// t-statistics from `robust_std_errors`.
+    /// z-statistics from `robust_std_errors` (RLM uses a normal reference).
     pub robust_t_statistics: Vec<f64>,
-    /// Two-sided p-values from `robust_t_statistics` on `n - k` degrees of freedom.
+    /// Two-sided normal p-values from `robust_t_statistics`.
     pub robust_p_values: Vec<f64>,
 }
 
@@ -104,11 +103,20 @@ impl RobustLinearModel {
             .ok_or_else(|| InferustError::InvalidInput("robust fit did not run".into()))?;
 
         let k = fit.coefficients.len();
-        let df = (n as f64) - (k as f64);
-        let robust_std_errors =
-            sandwich_se(x, &fit.residuals, &weights, final_scale, self.norm, n, k);
+        let df_resid = (n as f64) - (k as f64);
+        let df_model = (k as f64) - 1.0; // intercept + slopes → rank-1
+        let robust_std_errors = sandwich_se(
+            x,
+            &fit.residuals,
+            final_scale,
+            self.norm,
+            n,
+            k,
+            df_resid,
+            df_model,
+        );
 
-        let t_dist = StudentsT::new(0.0, 1.0, df).ok();
+        let normal = Normal::new(0.0, 1.0).ok();
         let robust_t_statistics: Vec<f64> = fit
             .coefficients
             .iter()
@@ -117,8 +125,9 @@ impl RobustLinearModel {
             .collect();
         let robust_p_values: Vec<f64> = robust_t_statistics
             .iter()
-            .map(|&t| match &t_dist {
-                Some(d) => 2.0 * d.cdf(-t.abs()),
+            .map(|&t| match &normal {
+                // Match statsmodels RLM: normal (not t) p-values via survival fn.
+                Some(d) => 2.0 * (1.0 - d.cdf(t.abs())),
                 None => f64::NAN,
             })
             .collect();
@@ -134,21 +143,26 @@ impl RobustLinearModel {
     }
 }
 
-/// Compute sandwich (HC) standard errors for an M-estimator.
+/// Statsmodels RLM default `cov='H1'` asymptotic covariance diagonal SEs.
 ///
-/// Bread: `A = X'WX` where W = diag of IRWLS final weights (= ψ'/σ for Huber).
-/// Meat:  `B = X' diag(ψ²) X` where ψᵢ = huber_psi(eᵢ/σ).
-/// Sandwich: `V = A⁻¹ B A⁻¹`.
+/// ```text
+/// m = mean(ψ'(u)),  v = var(ψ'(u))
+/// κ = 1 + (df_model+1)/n · v / m²
+/// factor = κ² · (Σψ² / df_resid) · σ² / (mean(ψ'))²
+/// V = factor · (X'X)⁻¹
+/// ```
+/// where `u = e/σ` and `normalized_cov_params ≈ (X'X)⁻¹`.
+#[allow(clippy::too_many_arguments)]
 fn sandwich_se(
     x: &[Vec<f64>],
     residuals: &[f64],
-    weights: &[f64],
     scale: f64,
     norm: RobustNorm,
     n: usize,
     k: usize,
+    df_resid: f64,
+    df_model: f64,
 ) -> Vec<f64> {
-    // Build design matrix with intercept column
     let mut x_mat = DMatrix::zeros(n, k);
     for (i, row) in x.iter().enumerate() {
         x_mat[(i, 0)] = 1.0;
@@ -157,33 +171,29 @@ fn sandwich_se(
         }
     }
 
-    let w_diag = DMatrix::from_diagonal(&DVector::from_vec(weights.to_vec()));
-    let xtwx = x_mat.transpose() * &w_diag * &x_mat;
-
-    let mut meat = DMatrix::zeros(k, k);
-    for i in 0..n {
-        let psi = huber_psi(residuals[i] / scale, norm);
-        let psi2 = psi * psi;
-        for j in 0..k {
-            let xij = x_mat[(i, j)];
-            for l in 0..=j {
-                meat[(j, l)] += psi2 * xij * x_mat[(i, l)];
-            }
-        }
-    }
-    for j in 0..k {
-        for l in 0..j {
-            meat[(l, j)] = meat[(j, l)];
-        }
+    let scale = scale.max(1e-12);
+    let mut psi = Vec::with_capacity(n);
+    let mut psi_deriv = Vec::with_capacity(n);
+    for &e in residuals {
+        let u = e / scale;
+        psi.push(huber_psi(u, norm));
+        psi_deriv.push(huber_psi_deriv(u, norm));
     }
 
-    let bread_inv = match xtwx.try_inverse() {
+    let mean_pd = psi_deriv.iter().sum::<f64>() / n as f64;
+    let var_pd = psi_deriv.iter().map(|d| (d - mean_pd).powi(2)).sum::<f64>() / n as f64;
+    let k_corr = 1.0 + (df_model + 1.0) / n as f64 * var_pd / mean_pd.max(1e-15).powi(2);
+    let ss_psi = psi.iter().map(|p| p * p).sum::<f64>();
+    let factor =
+        k_corr.powi(2) * (ss_psi / df_resid.max(1.0)) * scale.powi(2) / mean_pd.max(1e-15).powi(2);
+
+    let xtx = x_mat.transpose() * &x_mat;
+    let xtx_inv = match xtx.try_inverse() {
         Some(inv) => inv,
         None => return vec![f64::NAN; k],
     };
-    let sandwich = &bread_inv * meat * &bread_inv;
-
-    (0..k).map(|j| sandwich[(j, j)].max(0.0).sqrt()).collect()
+    let cov = xtx_inv * factor;
+    (0..k).map(|j| cov[(j, j)].max(0.0).sqrt()).collect()
 }
 
 fn huber_psi(value: f64, norm: RobustNorm) -> f64 {
@@ -193,6 +203,18 @@ fn huber_psi(value: f64, norm: RobustNorm) -> f64 {
                 value
             } else {
                 tuning * value.signum()
+            }
+        }
+    }
+}
+
+fn huber_psi_deriv(value: f64, norm: RobustNorm) -> f64 {
+    match norm {
+        RobustNorm::Huber { tuning } => {
+            if value.abs() <= tuning {
+                1.0
+            } else {
+                0.0
             }
         }
     }

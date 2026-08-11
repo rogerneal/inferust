@@ -1,16 +1,15 @@
 //! Parity tests for time-series functions against statsmodels references.
 //!
-//! ARIMA is intentionally excluded from strict numerical parity: statsmodels
-//! uses MLE via statespace by default, while inferust's `Arima` uses
-//! conditional sum-of-squares (CSS). The two should agree on large samples but
-//! drift on small ones. We assert plausibility bounds and structural facts
-//! instead, and the audit doc tracks the known gap.
+//! Default [`Arima`](inferust::time_series::Arima) fits use conditional
+//! sum-of-squares (CSS). Exact Gaussian MLE is available via `.exact_mle()` and
+//! is audited against statsmodels statespace for ARIMA(1,0,0) and ARIMA(1,0,1).
 
 mod common;
 
 use common::{
     as_f64, as_f64_matrix, as_f64_vec, assert_parity, check_scalar, check_vec, load_fixture,
 };
+use inferust::statespace::LinearGaussianModel;
 use inferust::time_series;
 
 #[test]
@@ -155,6 +154,92 @@ fn parity_arima_plausibility() {
         inferust_mean,
         implied_sm_mean,
         mean_diff
+    );
+}
+
+#[test]
+fn parity_arima_exact_mle_ar1() {
+    let fx = load_fixture("arima_ar1");
+    let y = as_f64_vec(&fx["dataset"]["y"]);
+    let sm_mu = as_f64(&fx["params"]["const"]);
+    let sm_phi = as_f64(&fx["params"]["ar.L1"]);
+    let sm_sigma2 = as_f64(&fx["sigma2"]);
+    let sm_llf = as_f64(&fx["llf"]);
+
+    // Filter-only llf at fixed statsmodels params (μ in obs intercept).
+    let filter_llf = LinearGaussianModel::arma(sm_mu, &[sm_phi], &[], sm_sigma2)
+        .expect("arma")
+        .filter(&y)
+        .expect("filter")
+        .log_likelihood;
+    let expected_filter = fx.get("filter_llf").map(as_f64).unwrap_or(sm_llf);
+    assert_parity(
+        "arima_exact_mle_ar1_filter",
+        vec![check_scalar(
+            "filter_llf",
+            filter_llf,
+            expected_filter,
+            1e-8,
+        )],
+    );
+
+    let result = time_series::Arima::new(1, 0, 0)
+        .exact_mle()
+        .max_iter(4000)
+        .fit(&y)
+        .expect("exact MLE AR(1)");
+    let inferust_mu = result.intercept / (1.0 - result.ar_coefficients[0]);
+    assert_parity(
+        "arima_exact_mle_ar1",
+        vec![
+            check_scalar("const_mu", inferust_mu, sm_mu, 1e-3),
+            check_scalar("ar.L1", result.ar_coefficients[0], sm_phi, 1e-3),
+            check_scalar("sigma2", result.sigma2, sm_sigma2, 5e-3),
+            check_scalar("llf", result.log_likelihood, sm_llf, 1e-2),
+        ],
+    );
+}
+
+#[test]
+fn parity_arima_exact_mle_arma11() {
+    let fx = load_fixture("arima_arma11");
+    let y = as_f64_vec(&fx["dataset"]["y"]);
+    let sm_mu = as_f64(&fx["params"]["const"]);
+    let sm_phi = as_f64(&fx["params"]["ar.L1"]);
+    let sm_theta = as_f64(&fx["params"]["ma.L1"]);
+    let sm_sigma2 = as_f64(&fx["sigma2"]);
+    let sm_llf = as_f64(&fx["llf"]);
+
+    let filter_llf = LinearGaussianModel::arma(sm_mu, &[sm_phi], &[sm_theta], sm_sigma2)
+        .expect("arma")
+        .filter(&y)
+        .expect("filter")
+        .log_likelihood;
+    assert_parity(
+        "arima_exact_mle_arma11_filter",
+        vec![check_scalar(
+            "filter_llf",
+            filter_llf,
+            as_f64(&fx["filter_llf"]),
+            1e-8,
+        )],
+    );
+
+    let result = time_series::Arima::new(1, 0, 1)
+        .exact_mle()
+        .max_iter(4000)
+        .fit(&y)
+        .expect("exact MLE ARMA(1,1)");
+    let inferust_mu = result.intercept / (1.0 - result.ar_coefficients[0]);
+    assert_parity(
+        "arima_exact_mle_arma11",
+        vec![
+            check_scalar("const_mu", inferust_mu, sm_mu, 1e-3),
+            check_scalar("ar.L1", result.ar_coefficients[0], sm_phi, 1e-3),
+            check_scalar("ma.L1", result.ma_coefficients[0], sm_theta, 1e-3),
+            check_scalar("sigma2", result.sigma2, sm_sigma2, 5e-3),
+            check_scalar("llf", result.log_likelihood, sm_llf, 1e-2),
+        ],
     );
 }
 

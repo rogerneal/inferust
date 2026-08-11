@@ -44,7 +44,7 @@ pub struct MixedLinearResult {
     pub group_count: usize,
     /// Number of EM iterations used.
     pub iterations: usize,
-    /// REML log-likelihood at convergence.
+    /// Exact REML log-likelihood at convergence (random-intercept model).
     pub reml_loglik: f64,
 }
 
@@ -80,17 +80,14 @@ impl MixedLinearModel {
         self
     }
 
-    /// Fit a random-intercept LMM via the EM algorithm (REML criterion).
+    /// Fit a random-intercept LMM via EM, then polish variance components with
+    /// profile REML.
     ///
     /// Model: yᵢⱼ = xᵢⱼ'β + bᵢ + εᵢⱼ,  bᵢ ~ N(0, σ²_b),  εᵢⱼ ~ N(0, σ²_e)
     ///
-    /// REML EM update equations (Dempster et al. 1977):
-    ///
-    ///   σ²_e ← [‖y − Xβ − Zb̂‖² + σ²_e · (n − tr(H))] / n
-    ///   σ²_b ← [Σ b̂ᵢ² + σ²_b · (q − Σ h_bᵢ)] / q
-    ///
-    /// where b̂ = EBLUP random intercepts, H is the hat-on-random component,
-    /// and β is updated each M-step via GLS on the current Σ.
+    /// After EM, γ = σ²_b / σ²_e is refined by maximizing the exact REML
+    /// criterion using per-group Woodbury algebra. `reml_loglik` is the exact
+    /// `-½[(N−p)ln(2π) + log|V| + log|X'V⁻¹X| + (y−Xβ)'V⁻¹(y−Xβ)]`.
     pub fn fit_random_intercept(
         &self,
         x: &[Vec<f64>],
@@ -250,6 +247,24 @@ impl MixedLinearModel {
             random_intercepts.insert(gid, lambda * resid_i);
         }
 
+        // Profile REML polish on γ = σ²_b / σ²_e (exact random-intercept REML).
+        let (sigma2_e, sigma2_b, beta) =
+            profile_reml_random_intercept(&x_mat, y, &group_indices, k, sigma2_e, sigma2_b)?;
+
+        // Refresh EBLUPs at polished variance components.
+        random_intercepts.clear();
+        for (gi, &gid) in group_ids.iter().enumerate() {
+            let idx = &group_indices[gi];
+            let n_i = idx.len() as f64;
+            let lambda = sigma2_b / (sigma2_b + sigma2_e / n_i.max(1e-15));
+            let resid_i: f64 = idx
+                .iter()
+                .map(|&j| y[j] - (x_mat.row(j) * &beta)[(0, 0)])
+                .sum::<f64>()
+                / n_i;
+            random_intercepts.insert(gid, lambda * resid_i);
+        }
+
         // Fitted values and residuals
         let fitted_values: Vec<f64> = (0..n)
             .map(|i| {
@@ -264,20 +279,7 @@ impl MixedLinearModel {
             .collect();
 
         // Fixed-effect standard errors from GLS information matrix
-        let mut xvx = DMatrix::zeros(k, k);
-        for idx in &group_indices {
-            let n_i = idx.len() as f64;
-            let c = sigma2_b / (sigma2_e + n_i * sigma2_b);
-            let x_i: DMatrix<f64> = DMatrix::from_rows(
-                &idx.iter()
-                    .map(|&j| x_mat.row(j).clone_owned())
-                    .collect::<Vec<_>>(),
-            );
-            let xt_i = x_i.transpose();
-            let ones = DVector::from_element(idx.len(), 1.0_f64);
-            let xt_ones = &xt_i * &ones;
-            xvx += (&xt_i * &x_i - c * &xt_ones * xt_ones.transpose()) / sigma2_e;
-        }
+        let (xvx, _) = accumulate_gls(&x_mat, y, &group_indices, k, sigma2_e, sigma2_b);
         let cov_beta = xvx.try_inverse().ok_or(InferustError::SingularMatrix)?;
         let std_errors: Vec<f64> = (0..k).map(|j| cov_beta[(j, j)].max(0.0).sqrt()).collect();
 
@@ -303,11 +305,7 @@ impl MixedLinearModel {
             0.0
         };
 
-        // Approximate REML log-likelihood
-        let reml_loglik = -0.5
-            * (residuals.iter().map(|r| r * r).sum::<f64>() / sigma2_e
-                + (n as f64) * sigma2_e.ln()
-                + (q as f64) * sigma2_b.ln());
+        let reml_loglik = exact_reml_loglik(&x_mat, y, &group_indices, &beta, sigma2_e, sigma2_b)?;
 
         let mut feature_names = vec!["const".to_string()];
         feature_names.extend(self.feature_names.iter().cloned());
@@ -593,6 +591,209 @@ impl MixedLinearModel {
             reml_loglik,
         })
     }
+}
+
+/// Accumulate GLS cross-products X'V⁻¹X and X'V⁻¹y for a random-intercept model
+/// using the Woodbury form of each group's Vᵢ = σ²_e I + σ²_b 11'.
+fn accumulate_gls(
+    x_mat: &DMatrix<f64>,
+    y: &[f64],
+    group_indices: &[Vec<usize>],
+    k: usize,
+    sigma2_e: f64,
+    sigma2_b: f64,
+) -> (DMatrix<f64>, DVector<f64>) {
+    let mut xvx = DMatrix::zeros(k, k);
+    let mut xvy = DVector::zeros(k);
+    for idx in group_indices {
+        let n_i = idx.len() as f64;
+        let c = sigma2_b / (sigma2_e + n_i * sigma2_b);
+        let x_i: DMatrix<f64> = DMatrix::from_rows(
+            &idx.iter()
+                .map(|&j| x_mat.row(j).clone_owned())
+                .collect::<Vec<_>>(),
+        );
+        let y_i: DVector<f64> = DVector::from_vec(idx.iter().map(|&j| y[j]).collect());
+        let xt_i = x_i.transpose();
+        let ones = DVector::from_element(idx.len(), 1.0_f64);
+        let xt_ones = &xt_i * &ones;
+        xvx += (&xt_i * &x_i - c * &xt_ones * xt_ones.transpose()) / sigma2_e;
+        let xt_y = &xt_i * &y_i;
+        let ones_y: f64 = y_i.sum();
+        xvy += (xt_y - c * &xt_ones * ones_y) / sigma2_e;
+    }
+    (xvx, xvy)
+}
+
+/// Exact random-intercept REML log-likelihood:
+/// `-½[(N−p)ln(2π) + log|V| + log|X'V⁻¹X| + (y−Xβ)'V⁻¹(y−Xβ)]`.
+fn exact_reml_loglik(
+    x_mat: &DMatrix<f64>,
+    y: &[f64],
+    group_indices: &[Vec<usize>],
+    beta: &DVector<f64>,
+    sigma2_e: f64,
+    sigma2_b: f64,
+) -> Result<f64> {
+    let n = y.len();
+    let k = beta.len();
+    let mut log_det_v = 0.0_f64;
+    let mut xvx = DMatrix::zeros(k, k);
+    let mut quad = 0.0_f64;
+    for idx in group_indices {
+        let n_i = idx.len() as f64;
+        let c = sigma2_b / (sigma2_e + n_i * sigma2_b);
+        log_det_v += (n_i - 1.0) * sigma2_e.ln() + (sigma2_e + n_i * sigma2_b).ln();
+        let x_i: DMatrix<f64> = DMatrix::from_rows(
+            &idx.iter()
+                .map(|&j| x_mat.row(j).clone_owned())
+                .collect::<Vec<_>>(),
+        );
+        let xt_i = x_i.transpose();
+        let ones = DVector::from_element(idx.len(), 1.0_f64);
+        let xt_ones = &xt_i * &ones;
+        xvx += (&xt_i * &x_i - c * &xt_ones * xt_ones.transpose()) / sigma2_e;
+        let mut r_sum = 0.0_f64;
+        let mut r_sq = 0.0_f64;
+        for &j in idx {
+            let rj = y[j] - (x_mat.row(j) * beta)[(0, 0)];
+            r_sum += rj;
+            r_sq += rj * rj;
+        }
+        quad += (r_sq - c * r_sum * r_sum) / sigma2_e;
+    }
+    let log_det_xvx = xvx
+        .cholesky()
+        .ok_or(InferustError::SingularMatrix)?
+        .ln_determinant();
+    if !log_det_xvx.is_finite() {
+        return Err(InferustError::SingularMatrix);
+    }
+    Ok(
+        -0.5 * ((n - k) as f64 * (2.0 * std::f64::consts::PI).ln()
+            + log_det_v
+            + log_det_xvx
+            + quad),
+    )
+}
+
+/// Profile REML over γ = σ²_b / σ²_e for a random-intercept model.
+///
+/// Starts from the EM estimates and searches a log-spaced grid around them,
+/// refining with a local ternary search. Returns polished `(σ²_e, σ²_b, β)`.
+fn profile_reml_random_intercept(
+    x_mat: &DMatrix<f64>,
+    y: &[f64],
+    group_indices: &[Vec<usize>],
+    k: usize,
+    sigma2_e0: f64,
+    sigma2_b0: f64,
+) -> Result<(f64, f64, DVector<f64>)> {
+    let n = y.len();
+    let gamma0 = if sigma2_e0 > 0.0 {
+        (sigma2_b0 / sigma2_e0).max(0.0)
+    } else {
+        0.0
+    };
+
+    let eval = |gamma: f64| -> Result<(f64, f64, f64, DVector<f64>)> {
+        // Work with V_* = I + γ 11' so σ²_e profiles out.
+        let mut xvx = DMatrix::zeros(k, k);
+        let mut xvy = DVector::zeros(k);
+        for idx in group_indices {
+            let n_i = idx.len() as f64;
+            let c = gamma / (1.0 + n_i * gamma);
+            let x_i: DMatrix<f64> = DMatrix::from_rows(
+                &idx.iter()
+                    .map(|&j| x_mat.row(j).clone_owned())
+                    .collect::<Vec<_>>(),
+            );
+            let y_i: DVector<f64> = DVector::from_vec(idx.iter().map(|&j| y[j]).collect());
+            let xt_i = x_i.transpose();
+            let ones = DVector::from_element(idx.len(), 1.0_f64);
+            let xt_ones = &xt_i * &ones;
+            xvx += &xt_i * &x_i - c * &xt_ones * xt_ones.transpose();
+            let xt_y = &xt_i * &y_i;
+            let ones_y: f64 = y_i.sum();
+            xvy += xt_y - c * &xt_ones * ones_y;
+        }
+        let beta = xvx
+            .clone()
+            .lu()
+            .solve(&xvy)
+            .ok_or(InferustError::SingularMatrix)?;
+        let mut quad_star = 0.0_f64;
+        for idx in group_indices {
+            let n_i = idx.len() as f64;
+            let c = gamma / (1.0 + n_i * gamma);
+            let mut r_sum = 0.0_f64;
+            let mut r_sq = 0.0_f64;
+            for &j in idx {
+                let rj = y[j] - (x_mat.row(j) * &beta)[(0, 0)];
+                r_sum += rj;
+                r_sq += rj * rj;
+            }
+            quad_star += r_sq - c * r_sum * r_sum;
+        }
+        let df = (n - k) as f64;
+        let sigma2_e = (quad_star / df).max(1e-12);
+        let sigma2_b = (gamma * sigma2_e).max(0.0);
+        // Exact REML with these components.
+        let ll = exact_reml_loglik(x_mat, y, group_indices, &beta, sigma2_e, sigma2_b)?;
+        Ok((ll, sigma2_e, sigma2_b, beta))
+    };
+
+    let mut best = eval(gamma0)?;
+    // Coarse log-grid covering near-zero through large γ.
+    let mut gammas: Vec<f64> = vec![0.0];
+    let mut g = 1e-12_f64;
+    while g <= 1e3 {
+        gammas.push(g);
+        g *= 1.5;
+    }
+    if gamma0 > 0.0 {
+        gammas.push(gamma0);
+    }
+    for &g in &gammas {
+        if let Ok(cand) = eval(g) {
+            if cand.0 > best.0 {
+                best = cand;
+            }
+        }
+    }
+
+    // Local ternary refinement around the best γ (on log scale if > 0).
+    let best_gamma = if best.1 > 0.0 { best.2 / best.1 } else { 0.0 };
+    if best_gamma > 0.0 {
+        let mut lo = (best_gamma / 4.0).max(1e-15);
+        let mut hi = best_gamma * 4.0;
+        for _ in 0..40 {
+            let m1 = lo * (hi / lo).powf(1.0 / 3.0);
+            let m2 = lo * (hi / lo).powf(2.0 / 3.0);
+            let c1 = eval(m1)?;
+            let c2 = eval(m2)?;
+            if c1.0 > c2.0 {
+                hi = m2;
+                if c1.0 > best.0 {
+                    best = c1;
+                }
+            } else {
+                lo = m1;
+                if c2.0 > best.0 {
+                    best = c2;
+                }
+            }
+        }
+    } else {
+        // Confirm boundary γ = 0 is best vs tiny γ.
+        if let Ok(cand) = eval(0.0) {
+            if cand.0 >= best.0 {
+                best = cand;
+            }
+        }
+    }
+
+    Ok((best.1, best.2, best.3))
 }
 
 #[cfg(test)]

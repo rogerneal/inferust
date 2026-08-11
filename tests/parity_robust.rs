@@ -16,24 +16,34 @@ fn parity_robust_small() {
         .fit(&x, &y)
         .expect("Robust LM fit failed");
 
-    // Params match statsmodels RLM (Huber). Sandwich SEs use a different
-    // convention than RLM.bse, so only coefficients are pinned here.
+    // Params and H1 asymptotic SEs / z-stats match statsmodels RLM (Huber).
     assert_parity(
         "robust_small",
-        vec![check_vec(
-            "params",
-            &result.fit.coefficients,
-            &as_f64_vec(&fx["params"]),
-            1e-4,
-        )],
-    );
-
-    assert!(result
-        .robust_std_errors
-        .iter()
-        .all(|s| s.is_finite() && *s > 0.0));
-    assert_eq!(
-        result.robust_t_statistics.len(),
-        result.fit.coefficients.len()
+        vec![
+            check_vec(
+                "params",
+                &result.fit.coefficients,
+                &as_f64_vec(&fx["params"]),
+                1e-4,
+            ),
+            check_vec(
+                "bse",
+                &result.robust_std_errors,
+                &as_f64_vec(&fx["bse"]),
+                1e-4,
+            ),
+            check_vec(
+                "tvalues",
+                &result.robust_t_statistics,
+                &as_f64_vec(&fx["tvalues"]),
+                1e-3,
+            ),
+            check_vec(
+                "pvalues",
+                &result.robust_p_values,
+                &as_f64_vec(&fx["pvalues"]),
+                1e-8,
+            ),
+        ],
     );
 }

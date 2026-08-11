@@ -559,6 +559,10 @@ Ordered roughly by priority. The parity gaps are tracked in more detail under
 
 ### Shipped
 
+- [x] ARIMA exact Kalman MLE (`.exact_mle()`; CSS still default)
+- [x] Panel within-df and clustered SE options
+- [x] Mixed exact REML llf / VC alignment; robust RLM H1 sandwich SEs
+- [x] Penalized GAM with GCV
 - [x] Fuller `gee` fixture outputs (z/p/rho); robust/mixed remain params(+bse) with documented SE/llf gaps
 - [x] Parity fixtures for `gam`, `gmm` (IV2SLS), `imputation`, and `treatment`
 - [x] Numerical parity for `Sarimax` (exog OLS), `Vecm` (Johansen), `Varmax` (VAR+exog OLS)

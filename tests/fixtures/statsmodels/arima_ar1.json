@@ -308,6 +308,8 @@
    4.225521021717135
   ]
  },
+ "estimator": "ARIMA.fit(method='statespace') trend='c'",
+ "filter_llf": -427.8628459126908,
  "kind": "arima_ar1",
  "llf": -427.8628459126908,
  "params": {

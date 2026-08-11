@@ -7,15 +7,30 @@
 use std::collections::BTreeMap;
 
 use nalgebra::{DMatrix, DVector};
-use statrs::distribution::{ChiSquared, ContinuousCDF};
+use statrs::distribution::{ChiSquared, ContinuousCDF, StudentsT};
 
 use crate::error::{InferustError, Result};
 use crate::regression::{Ols, OlsResult};
+
+/// How panel FE standard errors are clustered after the within transform.
+#[derive(Debug, Clone, Default)]
+enum PanelCluster {
+    #[default]
+    None,
+    /// Cluster by the entity (or time) ids passed to the FE fit.
+    Absorbing,
+    /// Cluster by an explicit group vector (same length as `y`).
+    Custom(Vec<usize>),
+}
 
 /// Panel OLS builder (entity / time / two-way FE and entity RE).
 #[derive(Debug, Clone)]
 pub struct PanelOls {
     feature_names: Vec<String>,
+    /// When true, rescale classical within-OLS covariance to absorbed-FE df
+    /// (linearmodels-style within-df correction). Default is false.
+    within_df: bool,
+    cluster: PanelCluster,
 }
 
 impl Default for PanelOls {
@@ -28,6 +43,8 @@ impl PanelOls {
     pub fn new() -> Self {
         Self {
             feature_names: Vec::new(),
+            within_df: false,
+            cluster: PanelCluster::None,
         }
     }
 
@@ -36,41 +53,72 @@ impl PanelOls {
         self
     }
 
+    /// Use residual degrees of freedom that account for absorbed fixed effects.
+    ///
+    /// After demean-then-OLS, classical covariance is rescaled so
+    /// `s² = SSR / df_within` with:
+    /// - entity FE: `df = n − k − n_entities`
+    /// - time FE: `df = n − k − n_times`
+    /// - two-way: `df = n − k − n_entities − n_times + 1`
+    ///
+    /// Default is `false` (plain within-OLS df = `n − k`) for backward
+    /// compatibility. Ignored when clustering is enabled.
+    pub fn within_df(mut self, enabled: bool) -> Self {
+        self.within_df = enabled;
+        self
+    }
+
+    /// Cluster-robust SEs by the absorbing factor ids (entity or time for
+    /// one-way FE; entity ids for two-way FE).
+    pub fn cluster_entity(mut self) -> Self {
+        self.cluster = PanelCluster::Absorbing;
+        self
+    }
+
+    /// Cluster-robust SEs with an explicit group vector (length `n`).
+    pub fn cluster(mut self, groups: Vec<usize>) -> Self {
+        self.cluster = PanelCluster::Custom(groups);
+        self
+    }
+
     /// Fit `y ~ x` with entity fixed effects removed by within transformation.
     ///
     /// Returns an [`OlsResult`] with **no intercept** (absorbed by the entity
-    /// means). Standard errors are the OLS-within SEs (not the linearmodels
-    /// within-df correction).
+    /// means). By default standard errors are demean-then-OLS (not the
+    /// linearmodels within-df correction); enable [`Self::within_df`] or
+    /// [`Self::cluster_entity`] / [`Self::cluster`] to change that.
     pub fn fit_entity_fe(
         &self,
         x: &[Vec<f64>],
         y: &[f64],
         entities: &[usize],
     ) -> Result<OlsResult> {
+        let (groups, _) = validate_panel(x, y, entities)?;
+        let n_entities = groups.len();
         let (x_dm, y_dm) = within_transform(x, y, entities)?;
-        Ols::new()
-            .with_feature_names(self.feature_names.clone())
-            .no_intercept()
-            .fit(&x_dm, &y_dm)
+        let result = self.fit_demeaned(&x_dm, &y_dm, entities)?;
+        self.maybe_within_df(result, y.len(), n_entities, 0, false)
     }
 
     /// Fit `y ~ x` with time fixed effects removed by within transformation.
     ///
-    /// Same SE convention as [`Self::fit_entity_fe`]: demean-then-OLS, not the
-    /// linearmodels within-df correction.
+    /// Same default SE convention as [`Self::fit_entity_fe`]: demean-then-OLS.
+    /// [`Self::cluster_entity`] clusters by the time ids passed here.
     pub fn fit_time_fe(&self, x: &[Vec<f64>], y: &[f64], times: &[usize]) -> Result<OlsResult> {
+        let (groups, _) = validate_panel(x, y, times)?;
+        let n_times = groups.len();
         let (x_dm, y_dm) = within_transform(x, y, times)?;
-        Ols::new()
-            .with_feature_names(self.feature_names.clone())
-            .no_intercept()
-            .fit(&x_dm, &y_dm)
+        let result = self.fit_demeaned(&x_dm, &y_dm, times)?;
+        self.maybe_within_df(result, y.len(), 0, n_times, false)
     }
 
     /// Fit `y ~ x` with entity and time fixed effects via iterative within.
     ///
     /// Alternating entity/time demeaning matches `linearmodels.panel.PanelOLS`
     /// with `entity_effects=True, time_effects=True` on balanced and unbalanced
-    /// panels. Standard errors are demean-then-OLS (no within-df correction).
+    /// panels. Default SEs are demean-then-OLS; [`Self::within_df`] applies the
+    /// two-way absorbed-df correction. [`Self::cluster_entity`] clusters by
+    /// `entities`.
     pub fn fit_two_way_fe(
         &self,
         x: &[Vec<f64>],
@@ -78,11 +126,61 @@ impl PanelOls {
         entities: &[usize],
         times: &[usize],
     ) -> Result<OlsResult> {
+        let (entity_groups, _) = validate_panel(x, y, entities)?;
+        let (time_groups, _) = validate_panel(x, y, times)?;
         let (x_dm, y_dm) = two_way_within_transform(x, y, entities, times)?;
-        Ols::new()
+        let result = self.fit_demeaned(&x_dm, &y_dm, entities)?;
+        self.maybe_within_df(
+            result,
+            y.len(),
+            entity_groups.len(),
+            time_groups.len(),
+            true,
+        )
+    }
+
+    fn fit_demeaned(
+        &self,
+        x_dm: &[Vec<f64>],
+        y_dm: &[f64],
+        absorbing_ids: &[usize],
+    ) -> Result<OlsResult> {
+        let mut ols = Ols::new()
             .with_feature_names(self.feature_names.clone())
-            .no_intercept()
-            .fit(&x_dm, &y_dm)
+            .no_intercept();
+        match &self.cluster {
+            PanelCluster::None => {}
+            PanelCluster::Absorbing => {
+                ols = ols.cluster_robust(absorbing_ids.to_vec());
+            }
+            PanelCluster::Custom(groups) => {
+                ols = ols.cluster_robust(groups.clone());
+            }
+        }
+        ols.fit(x_dm, y_dm)
+    }
+
+    fn maybe_within_df(
+        &self,
+        result: OlsResult,
+        n: usize,
+        n_entities: usize,
+        n_times: usize,
+        two_way: bool,
+    ) -> Result<OlsResult> {
+        if !self.within_df || !matches!(self.cluster, PanelCluster::None) {
+            return Ok(result);
+        }
+        let k = result.coefficients.len();
+        let df_within = if two_way {
+            n.saturating_sub(k + n_entities + n_times).saturating_add(1)
+        } else if n_entities > 0 {
+            n.saturating_sub(k + n_entities)
+        } else {
+            n.saturating_sub(k + n_times)
+        }
+        .max(1);
+        apply_within_df(result, df_within)
     }
 
     /// Fit entity random-effects GLS via the Swamy–Arora estimator.
@@ -323,6 +421,10 @@ impl HausmanResult {
 ///
 /// Compares slope coefficients from [`PanelOls::fit_entity_fe`] and
 /// [`PanelOls::fit_random_effects`]. The RE intercept is excluded.
+///
+/// Uses the covariance matrices stored on the FE / RE results. Passing an FE
+/// fit with [`PanelOls::within_df`]`(true)` therefore runs Hausman with the
+/// within-df-corrected FE covariance (closer to linearmodels' default FE SEs).
 pub fn hausman_fe_re(fe: &OlsResult, re: &PanelReResult) -> Result<HausmanResult> {
     let k = fe.coefficients.len();
     if re.coefficients.len() != k + 1 {
@@ -381,6 +483,44 @@ pub fn two_way_cluster_ids(entities: &[usize], times: &[usize]) -> Vec<usize> {
         .zip(times)
         .map(|(&e, &t)| e.wrapping_mul(1_000_003).wrapping_add(t))
         .collect()
+}
+
+/// Rescale classical within-OLS covariance to absorbed-FE residual df.
+fn apply_within_df(mut result: OlsResult, df_within: usize) -> Result<OlsResult> {
+    let df_ols = result.df_resid.max(1);
+    let df_within = df_within.max(1);
+    if df_within == df_ols {
+        return Ok(result);
+    }
+    let var_scale = df_ols as f64 / df_within as f64;
+    let se_scale = var_scale.sqrt();
+    let s2 = result.ssr / df_within as f64;
+    for row in &mut result.covariance_matrix {
+        for v in row.iter_mut() {
+            *v *= var_scale;
+        }
+    }
+    for se in &mut result.std_errors {
+        *se *= se_scale;
+    }
+    result.t_statistics = result
+        .coefficients
+        .iter()
+        .zip(result.std_errors.iter())
+        .map(|(&b, &se)| if se > 0.0 { b / se } else { f64::NAN })
+        .collect();
+    let t_dist = StudentsT::new(0.0, 1.0, df_within as f64)
+        .map_err(|_| InferustError::InvalidInput("invalid within degrees of freedom".into()))?;
+    result.p_values = result
+        .t_statistics
+        .iter()
+        .map(|&t| 2.0 * (1.0 - t_dist.cdf(t.abs())))
+        .collect();
+    result.mse_resid = s2;
+    result.df_resid = df_within;
+    result.adj_r_squared =
+        1.0 - (1.0 - result.r_squared) * (result.n - 1) as f64 / df_within as f64;
+    Ok(result)
 }
 
 fn validate_panel<'a>(
@@ -568,5 +708,55 @@ mod tests {
             .unwrap();
         assert_eq!(tw.coefficients.len(), 2);
         assert!(tw.std_errors.iter().all(|s| s.is_finite() && *s >= 0.0));
+    }
+
+    #[test]
+    fn within_df_inflates_entity_fe_se() {
+        let (x, y, entities) = toy_panel();
+        let plain = PanelOls::new().fit_entity_fe(&x, &y, &entities).unwrap();
+        let corrected = PanelOls::new()
+            .within_df(true)
+            .fit_entity_fe(&x, &y, &entities)
+            .unwrap();
+        let n = y.len();
+        let k = plain.coefficients.len();
+        let n_ent = 4usize;
+        let scale = ((n - k) as f64 / (n - k - n_ent) as f64).sqrt();
+        for (a, b) in plain.std_errors.iter().zip(corrected.std_errors.iter()) {
+            assert!((b - a * scale).abs() < 1e-12);
+        }
+        assert_eq!(corrected.df_resid, n - k - n_ent);
+    }
+
+    #[test]
+    fn cluster_entity_se_finite() {
+        // Larger noisy panel so demeaned X stays full rank under clustering.
+        let mut x = Vec::new();
+        let mut y = Vec::new();
+        let mut entities = Vec::new();
+        for e in 0..8 {
+            for t in 0..5 {
+                let x1 = (t + 1) as f64 + 0.3 * e as f64;
+                let x2 = t as f64 - 0.15 * e as f64 + 0.1 * ((e + t) % 3) as f64;
+                x.push(vec![x1, x2]);
+                y.push(1.0 + e as f64 + 0.5 * x1 - 0.25 * x2 + 0.2 * ((e * 3 + t) % 4) as f64);
+                entities.push(e);
+            }
+        }
+        let clustered = PanelOls::new()
+            .cluster_entity()
+            .fit_entity_fe(&x, &y, &entities)
+            .unwrap();
+        assert!(clustered
+            .std_errors
+            .iter()
+            .all(|s| s.is_finite() && *s > 0.0));
+        let custom = PanelOls::new()
+            .cluster(entities.clone())
+            .fit_entity_fe(&x, &y, &entities)
+            .unwrap();
+        for (a, b) in clustered.std_errors.iter().zip(custom.std_errors.iter()) {
+            assert!((a - b).abs() < 1e-12);
+        }
     }
 }
