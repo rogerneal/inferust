@@ -136,6 +136,21 @@ def dataset_gamma(n: int, k: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
     return x, y
 
 
+def dataset_inverse_gaussian(n: int, k: int, seed: int) -> tuple[np.ndarray, np.ndarray]:
+    """X[i,j] ~ N(0, 0.5); mu = exp(0.8 + X*beta); y floored positive for the
+    InverseGaussian family (Log link), using the same LCG as other fixtures."""
+    rng = _lcg(seed)
+    x = np.empty((n, k), dtype=np.float64)
+    for i in range(n):
+        for j in range(k):
+            x[i, j] = rng.standard_normal() * 0.5
+    beta = np.array([0.35, -0.15, 0.1][:k])
+    eta = 0.8 + x @ beta
+    mu = np.exp(np.clip(eta, -3.0, 3.0))
+    y = np.array([max(mu[i] * (1.0 + 0.25 * rng.standard_normal()), 0.05) for i in range(n)])
+    return x, y
+
+
 def dataset_ar1(n: int, phi: float, seed: int) -> np.ndarray:
     """Stationary AR(1) with intercept c such that the mean is 5.0."""
     rng = _lcg(seed)
@@ -356,6 +371,33 @@ def run_gamma(n: int, k: int, seed: int) -> dict[str, Any]:
             "mean_ci_upper": _to_list(pred["mean_ci_upper"]),
         }
     return out
+
+
+def run_inverse_gaussian(n: int, k: int, seed: int) -> dict[str, Any]:
+    """Fit an InverseGaussian GLM with Log link, matching
+    `inferust::glm::InverseGaussian::new()` / `GlmFamily::InverseGaussian`."""
+    x, y = dataset_inverse_gaussian(n, k, seed)
+    xc = sm.add_constant(x, has_constant="add")
+    with np.errstate(all="ignore"):
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            fam = sm.families.InverseGaussian(link=sm.families.links.Log())
+            res = sm.GLM(y, xc, family=fam).fit()
+    return {
+        "kind": "inverse_gaussian",
+        "dataset": {"n": n, "k": k, "seed": seed, **_xy_payload(x, y)},
+        "params": _to_list(res.params),
+        "bse": _to_list(res.bse),
+        "llf": float(res.llf),
+        "llnull": float(res.llnull),
+        "deviance": float(res.deviance),
+        "pearson_chi2": float(res.pearson_chi2),
+        "scale": float(res.scale),
+        "aic": float(res.aic),
+        "bic_llf": float(res.bic_llf),
+    }
 
 
 def run_regularized(name: str, n: int, k: int, seed: int, alpha: float, l1_ratio: float) -> dict[str, Any]:
@@ -1280,6 +1322,11 @@ def run_gee_poisson(n: int, k: int, seed: int) -> dict[str, Any]:
     xc = sm.add_constant(x, has_constant="add")
     clusters = np.array([(i % 10) for i in range(n)], dtype=int)
     res = GEE(y, xc, groups=clusters, family=Poisson(), cov_struct=Exchangeable()).fit()
+    dep = res.cov_struct.dep_params
+    if isinstance(dep, (list, tuple, np.ndarray)):
+        rho = float(np.asarray(dep, dtype=np.float64).ravel()[0])
+    else:
+        rho = float(dep) if dep is not None else float("nan")
     return {
         "kind": "gee_poisson",
         "dataset": {
@@ -1291,6 +1338,9 @@ def run_gee_poisson(n: int, k: int, seed: int) -> dict[str, Any]:
         },
         "params": _to_list(res.params),
         "bse": _to_list(res.bse),
+        "zvalues": _to_list(res.tvalues),
+        "pvalues": _to_list(res.pvalues),
+        "rho": rho,
         "llf": float(res.llf) if res.llf is not None else float("nan"),
     }
 
@@ -2066,6 +2116,400 @@ def run_panel_two_way_fe(
     }
 
 
+# ── GAM / GMM / imputation / treatment / SARIMAX / VECM / VARMAX ─────────────
+
+
+def run_gam(n: int = 60, seed: int = 100) -> dict[str, Any]:
+    """GaussianGam truncated-power spline + OLS (matches ``src/gam.rs``)."""
+    # Predictor on a fixed grid so the knot at 2.0 sits inside the support.
+    x = np.array([[i / 10.0] for i in range(n)], dtype=np.float64)
+    rng = _lcg(seed)
+    signal = 1.0 + 0.5 * x[:, 0] + np.maximum(x[:, 0] - 2.0, 0.0) ** 3
+    y = signal + np.array([0.15 * rng.standard_normal() for _ in range(n)])
+
+    # Truncated-power design: powers 1..=degree, then (x-knot)_+^degree.
+    degree = 3
+    knots = [2.0]
+    cols = [x[:, 0] ** p for p in range(1, degree + 1)]
+    for knot in knots:
+        cols.append(np.maximum(x[:, 0] - knot, 0.0) ** degree)
+    design = np.column_stack(cols)
+    xc = sm.add_constant(design, has_constant="add")
+    res = sm.OLS(y, xc).fit()
+    return {
+        "kind": "gam",
+        "dataset": {
+            "n": n,
+            "seed": seed,
+            "knots": knots,
+            "degree": degree,
+            "linear_columns": [],
+            **_xy_payload(x, y),
+        },
+        "params": _to_list(res.params),
+        "bse": _to_list(res.bse),
+        "rsquared": float(res.rsquared),
+    }
+
+
+def run_iv2sls(n: int = 80, seed: int = 101) -> dict[str, Any]:
+    """IV2SLS with one endogenous regressor and one excluded instrument."""
+    rng = _lcg(seed)
+    z = np.empty(n, dtype=np.float64)
+    u = np.empty(n, dtype=np.float64)
+    v = np.empty(n, dtype=np.float64)
+    for i in range(n):
+        z[i] = rng.standard_normal()
+        u[i] = rng.standard_normal() * 0.5
+        v[i] = rng.standard_normal() * 0.5
+    x_endog = 0.5 + 1.5 * z + u
+    y = 2.0 + 3.0 * x_endog + u + v
+    x = x_endog.reshape(-1, 1)
+    instruments = z.reshape(-1, 1)
+
+    xc = sm.add_constant(x, has_constant="add")
+    zc = sm.add_constant(instruments, has_constant="add")
+    ztz_inv = np.linalg.inv(zc.T @ zc)
+    xz = xc.T @ zc
+    ztx = zc.T @ xc
+    zty = zc.T @ y
+    x_pz_x = xz @ ztz_inv @ ztx
+    x_pz_y = xz @ ztz_inv @ zty
+    beta = np.linalg.solve(x_pz_x, x_pz_y)
+    resid = y - xc @ beta
+    df_resid = n - xc.shape[1]
+    sigma2 = float(resid @ resid / df_resid)
+    cov = sigma2 * np.linalg.inv(x_pz_x)
+    bse = np.sqrt(np.maximum(np.diag(cov), 0.0))
+
+    return {
+        "kind": "iv2sls",
+        "dataset": {
+            "n": n,
+            "seed": seed,
+            "x": _matrix(x),
+            "y": _to_list(y),
+            "instruments": _matrix(instruments),
+        },
+        "params": _to_list(beta),
+        "bse": _to_list(bse),
+        "ssr": float(resid @ resid),
+        "rsquared": float(1.0 - (resid @ resid) / np.sum((y - y.mean()) ** 2)),
+    }
+
+
+def _mice_ols_predict(x_train: np.ndarray, y_train: np.ndarray, x_new: np.ndarray) -> float:
+    """OLS with intercept (matches ``Ols::new().stable().fit``)."""
+    xc = sm.add_constant(x_train, has_constant="add")
+    beta = np.linalg.lstsq(xc, y_train, rcond=None)[0]
+    xnc = sm.add_constant(np.atleast_2d(x_new), has_constant="add")
+    return float((xnc @ beta).ravel()[0])
+
+
+def run_imputation_mice() -> dict[str, Any]:
+    """Mean-impute + 3-iteration MICE matching ``MiceImputer``."""
+    # Explicit Option matrix (None = missing). Tiny 8×3 with known pattern.
+    raw = [
+        [1.0, 2.0, 3.0],
+        [2.0, None, 5.0],
+        [3.0, 6.0, 9.0],
+        [None, 8.0, 11.0],
+        [5.0, 10.0, None],
+        [6.0, 12.0, 15.0],
+        [7.0, None, 17.0],
+        [8.0, 16.0, 19.0],
+    ]
+    n = len(raw)
+    p = len(raw[0])
+    missing = [[v is None for v in row] for row in raw]
+
+    # Column means over observed cells.
+    means = []
+    for j in range(p):
+        vals = [float(raw[i][j]) for i in range(n) if raw[i][j] is not None]
+        means.append(sum(vals) / len(vals))
+
+    mean_data = []
+    imputed_cells = 0
+    for i, row in enumerate(raw):
+        out = []
+        for j, v in enumerate(row):
+            if v is None:
+                out.append(means[j])
+                imputed_cells += 1
+            else:
+                out.append(float(v))
+        mean_data.append(out)
+
+    # MICE: initialise with means, then iterate OLS per incomplete column.
+    iterations = 3
+    filled = [row[:] for row in mean_data]
+    for _ in range(iterations):
+        for target_col in range(p):
+            if not any(missing[i][target_col] for i in range(n)):
+                continue
+            observed_rows = [i for i in range(n) if not missing[i][target_col]]
+            if len(observed_rows) <= p:
+                continue
+            x_train = np.array(
+                [
+                    [filled[i][j] for j in range(p) if j != target_col]
+                    for i in observed_rows
+                ],
+                dtype=np.float64,
+            )
+            y_train = np.array([filled[i][target_col] for i in observed_rows], dtype=np.float64)
+            for i in range(n):
+                if missing[i][target_col]:
+                    x_new = np.array(
+                        [filled[i][j] for j in range(p) if j != target_col],
+                        dtype=np.float64,
+                    )
+                    filled[i][target_col] = _mice_ols_predict(x_train, y_train, x_new)
+
+    return {
+        "kind": "imputation_mice",
+        "dataset": {
+            "n": n,
+            "p": p,
+            "iterations": iterations,
+            "data": [[None if v is None else float(v) for v in row] for row in raw],
+        },
+        "column_means": means,
+        "mean_impute_data": mean_data,
+        "imputed_cells": imputed_cells,
+        "fit_transform_data": filled,
+    }
+
+
+def run_treatment_ipw(n: int = 80, seed: int = 102) -> dict[str, Any]:
+    """Propensity logistic + IPW ATE/ATT matching ``PropensityScore::ipw``."""
+    rng = _lcg(seed)
+    x = np.empty((n, 2), dtype=np.float64)
+    for i in range(n):
+        x[i, 0] = rng.standard_normal()
+        x[i, 1] = rng.standard_normal() * 0.5
+    # Softmax-ish treatment propensity; Bernoulli via LCG.
+    eta_t = -0.2 + 0.8 * x[:, 0] - 0.5 * x[:, 1]
+    p_true = 1.0 / (1.0 + np.exp(-eta_t))
+    treatment = np.array([1.0 if rng.next_u01() < pi else 0.0 for pi in p_true])
+    outcome = (
+        1.0
+        + 0.3 * x[:, 0]
+        + 0.2 * x[:, 1]
+        + 2.0 * treatment
+        + np.array([0.4 * rng.standard_normal() for _ in range(n)])
+    )
+
+    xc = sm.add_constant(x, has_constant="add")
+    logit = sm.Logit(treatment, xc).fit(disp=False, maxiter=100)
+    params = _to_list(logit.params)
+    # Predicted propensity, clamped as in Rust.
+    raw_p = logit.predict(xc)
+    p = np.clip(raw_p, 1e-3, 1.0 - 1e-3)
+
+    treated_weighted = treated_weights = 0.0
+    control_weighted = control_weights = 0.0
+    att_control_weighted = att_control_weights = 0.0
+    treated_raw = treated_raw_n = 0.0
+    for i in range(n):
+        ti, yi, pi = treatment[i], outcome[i], p[i]
+        if ti == 1.0:
+            w = 1.0 / pi
+            treated_weighted += w * yi
+            treated_weights += w
+            treated_raw += yi
+            treated_raw_n += 1.0
+        else:
+            w = 1.0 / (1.0 - pi)
+            control_weighted += w * yi
+            control_weights += w
+            aw = pi / (1.0 - pi)
+            att_control_weighted += aw * yi
+            att_control_weights += aw
+
+    treated_mean = treated_weighted / treated_weights
+    control_mean = control_weighted / control_weights
+    ate = treated_mean - control_mean
+    att = (treated_raw / treated_raw_n) - (att_control_weighted / att_control_weights)
+
+    return {
+        "kind": "treatment_ipw",
+        "dataset": {
+            "n": n,
+            "seed": seed,
+            "x": _matrix(x),
+            "treatment": _to_list(treatment),
+            "outcome": _to_list(outcome),
+        },
+        "params": params,
+        "bse": _to_list(logit.bse),
+        "ate": float(ate),
+        "att": float(att),
+        "treated_mean": float(treated_mean),
+        "control_mean": float(control_mean),
+        "propensity_scores": _to_list(p),
+    }
+
+
+def run_sarimax(n: int = 60, seed: int = 103) -> dict[str, Any]:
+    """Pin SARIMAX exogenous OLS projection (const + exog), not full MLE."""
+    rng = _lcg(seed)
+    t = np.arange(n, dtype=np.float64)
+    exog = np.array([[(i % 3) - 1.0, rng.standard_normal() * 0.3] for i in range(n)])
+    y = (
+        2.0
+        + 0.05 * t
+        + 1.2 * exog[:, 0]
+        - 0.7 * exog[:, 1]
+        + 0.8 * np.sin(2.0 * math.pi * t / 12.0)
+        + np.array([0.25 * rng.standard_normal() for _ in range(n)])
+    )
+    xc = sm.add_constant(exog, has_constant="add")
+    res = sm.OLS(y, xc).fit()
+    return {
+        "kind": "sarimax",
+        "dataset": {
+            "n": n,
+            "seed": seed,
+            "order": [1, 0, 0],
+            "seasonal_order": [0, 0, 0, 12],
+            "y": _to_list(y),
+            "x": _matrix(exog),
+        },
+        "exog_coefficients": _to_list(res.params),
+    }
+
+
+def _johansen_inferust(series: list[np.ndarray], lags: int = 0) -> dict[str, Any]:
+    """Johansen eigenvalues / trace stats matching ``Vecm`` (lags=0 path)."""
+    k = len(series)
+    t = len(series[0])
+    p = lags
+    n = t - p - 1
+    dy = np.array(
+        [[series[v][i + 1] - series[v][i] for v in range(k)] for i in range(t - 1)],
+        dtype=np.float64,
+    )
+    # lags == 0: raw ΔY_t and Y_{t-1}.
+    r0 = dy[p:, :]
+    r1 = np.column_stack([s[p : t - 1] for s in series])
+
+    def moment(r: np.ndarray) -> np.ndarray:
+        return (r.T @ r) / n
+
+    s00 = moment(r0)
+    s11 = moment(r1)
+    s01 = (r0.T @ r1) / n
+    s10 = (r1.T @ r0) / n
+
+    def regularized_inv(m: np.ndarray) -> np.ndarray:
+        try:
+            return np.linalg.inv(m)
+        except np.linalg.LinAlgError:
+            scale = max(abs(np.trace(m)), 1.0) * 1e-10
+            return np.linalg.inv(m + np.eye(m.shape[0]) * scale)
+
+    m = regularized_inv(s11) @ s10 @ regularized_inv(s00) @ s01
+    m_sym = 0.5 * (m + m.T)
+    eigvals, _ = np.linalg.eigh(m_sym)
+    eigvals = np.abs(np.sort(eigvals)[::-1])
+    trace = [
+        float(
+            -(n)
+            * np.sum(np.log(1.0 - np.clip(eigvals[r0:], 0.0, 0.9999)))
+        )
+        for r0 in range(k)
+    ]
+    return {
+        "eigenvalues": _to_list(eigvals),
+        "trace_statistics": trace,
+        "n": int(n),
+        "k": int(k),
+    }
+
+
+def run_vecm(n: int = 80, seed: int = 104) -> dict[str, Any]:
+    """VECM Johansen eigenvalues pinned to inferust's reduced-rank path."""
+    rng = _lcg(seed)
+    w = np.cumsum([rng.standard_normal() for _ in range(n)])
+    y1 = w + np.array([0.3 * rng.standard_normal() for _ in range(n)])
+    y2 = 1.5 * w + np.array([0.3 * rng.standard_normal() for _ in range(n)])
+    joh = _johansen_inferust([y1, y2], lags=0)
+
+    # Optional statsmodels reference (may diverge; documented in parity.md).
+    sm_ref = None
+    try:
+        from statsmodels.tsa.vector_ar.vecm import coint_johansen
+
+        sm_res = coint_johansen(np.column_stack([y1, y2]), det_order=-1, k_ar_diff=0)
+        sm_ref = {
+            "eigenvalues": _to_list(sm_res.eig),
+            "trace_statistics": _to_list(sm_res.lr1),
+        }
+    except Exception:  # pragma: no cover - optional
+        sm_ref = None
+
+    return {
+        "kind": "vecm",
+        "dataset": {
+            "n": n,
+            "seed": seed,
+            "lags": 0,
+            "rank": 1,
+            "series": [_to_list(y1), _to_list(y2)],
+        },
+        "eigenvalues": joh["eigenvalues"],
+        "trace_statistics": joh["trace_statistics"],
+        "effective_n": joh["n"],
+        "statsmodels_coint_johansen": sm_ref,
+    }
+
+
+def run_varmax(n: int = 50, seed: int = 105) -> dict[str, Any]:
+    """Per-equation OLS VAR+exog coefficients matching ``Varmax`` layout."""
+    rng = _lcg(seed)
+    # Endogenous: two AR-ish series; one exogenous.
+    e1 = np.array([rng.standard_normal() for _ in range(n)])
+    e2 = np.array([rng.standard_normal() for _ in range(n)])
+    y1 = np.zeros(n)
+    y2 = np.zeros(n)
+    exog = np.array([[(i % 4) / 4.0] for i in range(n)], dtype=np.float64)
+    for i in range(1, n):
+        y1[i] = 0.4 * y1[i - 1] + 0.2 * y2[i - 1] + 0.5 * exog[i, 0] + e1[i]
+        y2[i] = 0.1 * y1[i - 1] + 0.3 * y2[i - 1] - 0.3 * exog[i, 0] + e2[i]
+
+    lags = 1
+    k = 2
+    k_x = 1
+    n_eff = n - lags
+    # Regressor: [const, y1_{t-1}, y2_{t-1}, x_t]
+    x_mat = np.ones((n_eff, 1 + k * lags + k_x), dtype=np.float64)
+    for row in range(n_eff):
+        t_idx = row + lags
+        x_mat[row, 1] = y1[t_idx - 1]
+        x_mat[row, 2] = y2[t_idx - 1]
+        x_mat[row, 3] = exog[t_idx, 0]
+
+    coefficients = []
+    for var in (y1, y2):
+        y_eq = var[lags:]
+        beta = np.linalg.lstsq(x_mat, y_eq, rcond=None)[0]
+        coefficients.append(_to_list(beta))
+
+    return {
+        "kind": "varmax",
+        "dataset": {
+            "n": n,
+            "seed": seed,
+            "lags": lags,
+            "series": [_to_list(y1), _to_list(y2)],
+            "exog": _matrix(exog),
+        },
+        "coefficients": coefficients,
+    }
+
+
 def emit(out_dir: Path, name: str, payload: dict[str, Any]) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / f"{name}.json"
@@ -2100,6 +2544,7 @@ def main() -> None:
     emit(out, "logit_small", run_logit(n=200, k=3, seed=4))
     emit(out, "poisson_small", run_poisson(n=200, k=3, seed=5))
     emit(out, "gamma_glm", run_gamma(n=150, k=2, seed=41))
+    emit(out, "inverse_gaussian_glm", run_inverse_gaussian(n=150, k=2, seed=42))
 
     # Regularized regression
     emit(out, "ridge_small", run_regularized("ridge", n=80, k=3, seed=31, alpha=0.5, l1_ratio=0.0))
@@ -2199,6 +2644,15 @@ def main() -> None:
         "panel_two_way_fe",
         run_panel_two_way_fe(n_entities=12, n_times=8, k=2, seed=85),
     )
+
+    # GAM / GMM / imputation / treatment / SARIMAX / VECM / VARMAX
+    emit(out, "gam_small", run_gam(n=60, seed=100))
+    emit(out, "iv2sls_small", run_iv2sls(n=80, seed=101))
+    emit(out, "imputation_mice_small", run_imputation_mice())
+    emit(out, "treatment_ipw_small", run_treatment_ipw(n=80, seed=102))
+    emit(out, "sarimax_small", run_sarimax(n=60, seed=103))
+    emit(out, "vecm_small", run_vecm(n=80, seed=104))
+    emit(out, "varmax_small", run_varmax(n=50, seed=105))
 
     print(f"\nstatsmodels version: {sm.__version__}")
 

@@ -7,7 +7,7 @@
 //! | Module | Contents |
 //! |--------|---------|
 //! | [`regression`] | OLS/WLS/GLS/FGLS, quantile regression, plus rolling and recursive OLS with fast/stable/HAC solvers, HC0-HC3 and Newey-West SEs, confidence intervals, influence diagnostics, full summary, and Ridge/Lasso/ElasticNet regularization |
-//! | [`glm`] | Binary logistic, Poisson, and Gamma regression with Wald inference, LRT, residual diagnostics, prediction intervals, classification metrics |
+//! | [`glm`] | Binary logistic, Poisson, Gamma, and InverseGaussian regression with Wald inference, LRT, residual diagnostics, prediction intervals, classification metrics |
 //! | [`gam`] | Gaussian additive models with spline basis expansion |
 //! | [`gmm`] | Instrumental variables / 2SLS econometrics starter |
 //! | [`survival`] | Kaplan-Meier estimator, log-rank test, Cox proportional hazards regression |
@@ -17,7 +17,7 @@
 //! | [`contingency`] | 2x2 tables, odds/risk ratios, McNemar, CMH |
 //! | [`diagnostics`] | VIF, Breusch-Pagan, White, and RESET diagnostics |
 //! | [`discrete`] | Probit, ordered logit, negative binomial, multinomial logit, and zero-inflated Poisson |
-//! | [`glm_family`] | Generic Gaussian/Binomial/Poisson/Gamma GLM front-end |
+//! | [`glm_family`] | Generic Gaussian/Binomial/Poisson/Gamma/InverseGaussian GLM front-end |
 //! | [`multivariate`] | MANOVA and PCA starters |
 //! | [`imputation`] | Mean imputation and MICE-style chained equations |
 //! | [`treatment`] | Propensity scores, IPW treatment effects, and balance diagnostics |

@@ -1,6 +1,6 @@
 [package]
 name = "inferust"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 # Floor set by nalgebra 0.35 and statrs 0.19; verified with `cargo +1.89 check
 # --all-targets`. The optional `polars` feature needs a newer toolchain.
@@ -107,3 +107,19 @@ path = "tests/parity_survival.rs"
 [[test]]
 name = "parity_regularized"
 path = "tests/parity_regularized.rs"
+
+[[test]]
+name = "parity_gam"
+path = "tests/parity_gam.rs"
+
+[[test]]
+name = "parity_gmm"
+path = "tests/parity_gmm.rs"
+
+[[test]]
+name = "parity_imputation"
+path = "tests/parity_imputation.rs"
+
+[[test]]
+name = "parity_treatment"
+path = "tests/parity_treatment.rs"

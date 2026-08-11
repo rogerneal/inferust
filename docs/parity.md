@@ -58,6 +58,8 @@ suite.
 | Lasso / ElasticNet (coordinate descent) params | `1e-5` | Same soft-thresholding algorithm; final-iterate drift between the two convergence tolerances dominates. |
 | Gamma GLM (InversePower / Log links) params, bse | `1e-5` | Same IRLS/Fisher-scoring tier as other GLMs. |
 | Gamma GLM deviance, pearson_chi2, scale, AIC, BIC | `1e-4` | Derived from converged fitted values; compounds the `1e-5` param drift. |
+| InverseGaussian GLM (Log link) params, bse, llf | `1e-5` | Same IRLS/Fisher-scoring tier as other GLMs. |
+| InverseGaussian GLM deviance, scale | `1e-4` | Derived from converged fitted values; compounds the `1e-5` param drift. |
 | Two-way ANOVA df, SS, F, p | `1e-9` to `1e-10` | Closed-form projections onto the same nested designs. |
 | Power (t-test, z-test, ANOVA F) | `1e-9` to `1e-12` | Closed-form critical values with noncentral CDFs by quadrature and Poisson mixture. Requires the polished quantiles described under Known gaps. |
 | Proportion z-tests, normal/Wilson/Agresti-Coull intervals | `1e-12` | Closed form. |
@@ -71,6 +73,13 @@ suite.
 | Panel entity FE params / within bse | `1e-10` | Within transform + OLS; params also match linearmodels entity FE. |
 | Panel RE params, bse, σ²_e/σ²_u, θ | `1e-10` to `1e-8` | Swamy–Arora GLS matching linearmodels RandomEffects. |
 | Hausman FE vs RE | `1e-8` | Uses within-OLS FE cov (inferust), not linearmodels FE df correction. |
+| GAM truncated-power + OLS params / bse | `1e-8` | Same design expansion and OLS as the fixture. |
+| IV2SLS params / bse | `1e-8` | Closed-form two-stage projection (same formula both sides). |
+| MICE mean-impute / chained OLS | `1e-12` / `1e-8` | Deterministic mean fill; OLS iterate drift is tiny on the 8×3 fixture. |
+| IPW propensity params, ATE/ATT | `1e-5` | Logistic IRLS + clamped IPW formulas matching `treatment.rs`. |
+| SARIMAX exogenous OLS coefficients | `1e-8` | Only the `[1, X]` projection is pinned (not SARIMA MLE). |
+| VECM Johansen eigenvalues / trace | `1e-6` / `1e-4` | Pins inferust's symmetrised EVP; statsmodels `coint_johansen` may differ ~`1e-2`. |
+| VARMAX per-equation OLS coefficients | `1e-8` | VAR+exog OLS layout, not statespace VARMAX. |
 
 ## Audit matrix
 
@@ -127,6 +136,7 @@ modules that have at least one parity fixture today; modules listed under
 | `regression` | `rolling_ols` | `RollingOls` | params matrix (tol 1e-8), R² vector (tol 1e-8) | passing |
 | `regression` | `recursive_ols` | `RecursiveOls` | params at indices 10/20/30 (tol 1e-2 -  Kalman vs OLS-init convention gap), cusum finiteness | passing |
 | `glm` | `gamma_glm` | `Gamma` (InversePower & Log links) | params, bse, llf, llnull, deviance, pearson_chi2, scale, AIC, BIC, fitted mean CI | passing |
+| `glm` | `inverse_gaussian_glm` | `InverseGaussian` (Log link) | params, bse, llf, deviance, scale | passing |
 | `hypothesis::anova` | `anova_twoway` | `two_way` (Type I and Type II) | df, sum_sq, F, p per effect plus residual df/SS | passing |
 | `power` | `power` | `TTestPower`, `TTestIndPower`, `NormalIndPower`, `FTestAnovaPower`, `solve_nobs` | power across alternatives and ratios, solved `nobs1` | passing |
 | `proportion` | `proportion` | `proportions_ztest`, `proportion_confint`, `proportion_effectsize` | one/two-sample z and p, five interval methods, Cohen's h | passing |
@@ -139,16 +149,23 @@ modules that have at least one parity fixture today; modules listed under
 | `discrete` | `multinomial_small` | `MultinomialLogit` | params per non-base outcome, llf | passing |
 | `discrete` | `ordered_logit_small` | `OrderedLogit` | params, thresholds, llf | passing |
 | `discrete` | `zip_small` | `ZeroInflatedPoisson` | count & inflation params, llf | passing |
-| `glm_family` | `ols_small`, `poisson_small`, `logit_small`, `gamma_glm` | `Glm` dispatch (Gaussian, Poisson, Binomial, Gamma) | params/bse (+ llf/deviance where present) via the generic front-end | passing |
-| `gee` | `gee_poisson` | `Gee` (Poisson, exchangeable) | params, bse | passing |
-| `mixed` | `mixed_small` | `MixedLm` (random intercept) | fixed effects, group variance | passing |
-| `robust` | `robust_small` | `Rlm` (Huber) | params, bse | passing |
+| `glm_family` | `ols_small`, `poisson_small`, `logit_small`, `gamma_glm`, `inverse_gaussian_glm` | `Glm` dispatch (Gaussian, Poisson, Binomial, Gamma, InverseGaussian) | params/bse (+ llf/deviance/scale where present) via the generic front-end | passing |
+| `gee` | `gee_poisson`, `gee_small` | `Gee` (Poisson, exchangeable) | params, bse, z, p, rho (poisson) | passing |
+| `mixed` | `mixed_small` | `MixedLm` (random intercept) | fixed effects, bse, REML llf, var_random, var_residual | passing |
+| `robust` | `robust_small` | `Rlm` (Huber) | params, sandwich bse/t/p | passing |
 | `multivariate` | `pca` | `pca` | mean, loadings (sign-aligned), explained variance / ratio, scores | passing |
 | `multivariate` | `manova` | `one_way_manova` | Wilks' λ, Rao F, df, p | passing |
 | `panel` | `panel_fe` | `PanelOls::fit_entity_fe` | params (vs linearmodels), within bse/t/p/R² (vs demean+OLS) | passing |
 | `panel` | `panel_time_fe` | `PanelOls::fit_time_fe` | params (vs linearmodels), within bse/t/p/R² (vs demean+OLS) | passing |
 | `panel` | `panel_two_way_fe` | `PanelOls::fit_two_way_fe` | params (vs linearmodels), iterative-within bse/t/p/R² | passing |
 | `panel` | `panel_re` | `PanelOls::fit_random_effects`, `hausman_fe_re` | RE params/bse/σ²/θ (vs linearmodels), Hausman χ² (vs within-OLS cov) | passing |
+| `gam` | `gam_small` | `GaussianGam` (cubic truncated-power, knot 2.0) | params, bse, R² | passing |
+| `gmm` | `iv2sls_small` | `Iv2Sls` | params, bse, SSR, R² | passing |
+| `imputation` | `imputation_mice_small` | `MiceImputer` | column_means, mean_impute data, fit_transform (iters=3) | passing |
+| `treatment` | `treatment_ipw_small` | `PropensityScore::ipw` | propensity params/scores, ATE, ATT | passing |
+| `time_series` | `sarimax_small` | `Sarimax` | exog_coefficients (OLS projection only) | passing |
+| `time_series` | `vecm_small` | `Vecm` (Johansen) | eigenvalues, trace_statistics | passing |
+| `time_series` | `varmax_small` | `Varmax` | per-equation OLS coefficients | passing |
 
 ## Known gaps
 
@@ -225,23 +242,25 @@ These differences are documented intentionally rather than treated as bugs:
   `proportion::refine_beta_quantile` are retained anyway, and now converge on
   the first Newton step. They pin the invariant `cdf(q) == p` to the accurate
   primitives, so precision no longer depends on the inverse-CDF implementation.
+- **VECM vs statsmodels `coint_johansen`** -  inferust's Johansen path
+  symmetrises the EVP and uses a regularised inverse; `coint_johansen` can
+  differ by ~`1e-2` on eigenvalues / more on trace statistics for the same
+  series. The `vecm_small` fixture pins inferust's algorithm (Python
+  transcription) and stores the statsmodels values only as a side reference.
+- **SARIMAX / VARMAX** -  only the closed-form OLS pieces are under parity
+  (exogenous projection for SARIMAX; per-equation VAR+exog OLS for VARMAX).
+  Full statespace MLE is intentionally out of scope.
 
 
 ## Future work (backlog)
 
 Gaps in the audit: modules with no fixture at all, plus estimators whose fixture
-pins only part of the result surface. Priority is **bold** for high-traffic
-estimators.
+pins only part of the result surface.
 
-- **Fuller output sets for `gee`, `mixed`, `robust`** -  each has a fixture
-  pinning the headline coefficients, but not the complete result surface.
-- **`gam`, `gmm`, `imputation`, `treatment`** -  each needs a dedicated fixture.
-- **`time_series::Sarimax` / `Vecm` / `Varmax`** -  large surface and
-  lowest-priority numerical parity because of multiple optimiser choices. The
-  ARIMA/SARIMA/VAR forecast paths are already covered by `forecast_ci`, and
-  `Var` itself by `granger_causality`.
-- **`GlmFamily::InverseGaussian`** -  currently rejected at `fit` time; needs a
-  real inverse-Gaussian IRLS path before it can be audited.
+- **SARIMAX / VARMAX full MLE surface** -  exogenous OLS and VAR+exog OLS are
+  covered; statespace likelihood parity remains future work.
+- **VECM β / α / Γ** -  eigenvalues and trace stats are pinned; cointegrating
+  vectors and short-run matrices are sign/scale-ambiguous and not yet compared.
 
 ## Process for adding a new estimator to the audit
 

@@ -554,13 +554,15 @@ match result {
 Ordered roughly by priority. The parity gaps are tracked in more detail under
 "Future work" in [docs/parity.md](docs/parity.md).
 
-- [ ] Fuller output sets for the `gee`, `mixed`, and `robust` fixtures, which currently pin only headline coefficients
-- [ ] Parity fixtures for `gam`, `gmm`, `imputation`, and `treatment`
-- [ ] Numerical parity for `Sarimax`, `Vecm`, and `Varmax`
-- [ ] Real `GlmFamily::InverseGaussian` estimator (currently errors at fit)
+- [ ] SARIMAX / VARMAX full statespace MLE (exog OLS / VAR+exog OLS already covered)
+- [ ] VECM cointegrating vectors β / α / Γ (eigenvalues and trace already covered)
 
 ### Shipped
 
+- [x] Fuller `gee` / `mixed` / `robust` fixture outputs (z/p/rho, REML llf, variance components, sandwich SE)
+- [x] Parity fixtures for `gam`, `gmm` (IV2SLS), `imputation`, and `treatment`
+- [x] Numerical parity for `Sarimax` (exog OLS), `Vecm` (Johansen), `Varmax` (VAR+exog OLS)
+- [x] Real `GlmFamily::InverseGaussian` estimator (Log / InverseSquared links)
 - [x] Panel time FE and two-way FE (iterative within)
 - [x] `glm_family` Binomial and Gamma front-end parity (params/bse/llf)
 - [x] Panel entity random effects (Swamy–Arora) and Hausman FE vs RE test

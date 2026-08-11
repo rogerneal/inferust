@@ -276,3 +276,90 @@ fn parity_var_forecast_interval() {
     }
     assert_parity("var_forecast_interval", checks);
 }
+
+// ── SARIMAX / VECM / VARMAX (simplified surfaces) ─────────────────────────────
+
+/// SARIMAX exogenous coefficients from the OLS projection step only.
+///
+/// Full SARIMAX MLE is not compared: inferust projects out `[1, X]` then fits
+/// SARIMA on the residuals.
+#[test]
+fn parity_sarimax_exog_coefficients() {
+    let fx = load_fixture("sarimax_small");
+    let y = as_f64_vec(&fx["dataset"]["y"]);
+    let x = as_f64_matrix(&fx["dataset"]["x"]);
+    // Exog OLS is independent of SARIMA orders; s ≥ 2 is required by Sarima.
+    let res = time_series::Sarimax::new(1, 0, 0, 0, 0, 0, 12)
+        .fit(&y, &x)
+        .expect("SARIMAX fit failed");
+
+    assert_parity(
+        "sarimax_exog",
+        vec![check_vec(
+            "exog_coefficients",
+            &res.exog_coefficients,
+            &as_f64_vec(&fx["exog_coefficients"]),
+            1e-8,
+        )],
+    );
+}
+
+/// VECM Johansen eigenvalues and trace statistics.
+///
+/// Fixture pins inferust's reduced-rank path (symmetrised EVP). statsmodels
+/// ``coint_johansen`` is stored for reference but can diverge by ~1e-2 because
+/// of deterministic-term / inversion details; tests use the inferust pin.
+#[test]
+fn parity_vecm_johansen() {
+    let fx = load_fixture("vecm_small");
+    let series = as_f64_matrix(&fx["dataset"]["series"]);
+    let lags = fx["dataset"]["lags"].as_u64().expect("lags") as usize;
+    let rank = fx["dataset"]["rank"].as_u64().expect("rank") as usize;
+
+    let res = time_series::Vecm::new(lags, rank)
+        .fit(&series)
+        .expect("VECM fit failed");
+
+    assert_parity(
+        "vecm_johansen",
+        vec![
+            check_vec(
+                "eigenvalues",
+                &res.eigenvalues,
+                &as_f64_vec(&fx["eigenvalues"]),
+                1e-6,
+            ),
+            check_vec(
+                "trace_statistics",
+                &res.trace_statistics,
+                &as_f64_vec(&fx["trace_statistics"]),
+                1e-4,
+            ),
+        ],
+    );
+}
+
+/// VARMAX per-equation OLS coefficients (not statespace VARMAX MLE).
+#[test]
+fn parity_varmax_ols_coefficients() {
+    let fx = load_fixture("varmax_small");
+    let series = as_f64_matrix(&fx["dataset"]["series"]);
+    let exog = as_f64_matrix(&fx["dataset"]["exog"]);
+    let lags = fx["dataset"]["lags"].as_u64().expect("lags") as usize;
+
+    let res = time_series::Varmax::new(lags)
+        .fit(&series, &exog)
+        .expect("VARMAX fit failed");
+
+    let expected = as_f64_matrix(&fx["coefficients"]);
+    let mut checks = Vec::new();
+    for (eq, coef) in res.coefficients.iter().enumerate() {
+        checks.push(check_vec(
+            &format!("coefficients[{eq}]"),
+            coef,
+            &expected[eq],
+            1e-8,
+        ));
+    }
+    assert_parity("varmax_ols", checks);
+}

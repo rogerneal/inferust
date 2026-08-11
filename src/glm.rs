@@ -1387,6 +1387,339 @@ impl Gamma {
     }
 }
 
+/// Link functions for inverse-Gaussian regression.
+///
+/// Defaults to [`InverseGaussianLink::Log`] (`g(μ) = ln(μ)`), matching
+/// `statsmodels.genmod.families.InverseGaussian(Log())`. The canonical
+/// [`InverseGaussianLink::InverseSquared`] link (`g(μ) = 1/μ²`) is also
+/// supported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InverseGaussianLink {
+    #[default]
+    Log,
+    InverseSquared,
+}
+
+impl InverseGaussianLink {
+    fn linkfun(&self, mu: f64) -> f64 {
+        match self {
+            InverseGaussianLink::Log => mu.ln(),
+            InverseGaussianLink::InverseSquared => 1.0 / (mu * mu),
+        }
+    }
+
+    fn linkinv(&self, eta: f64) -> f64 {
+        match self {
+            InverseGaussianLink::Log => eta.clamp(-700.0, 700.0).exp(),
+            InverseGaussianLink::InverseSquared => 1.0 / eta.max(1e-24).sqrt(),
+        }
+    }
+
+    /// Returns `(mu, dmu/deta)` at the given linear predictor.
+    fn mu_and_derivative(&self, eta: f64) -> (f64, f64) {
+        match self {
+            InverseGaussianLink::Log => {
+                let mu = eta.clamp(-700.0, 700.0).exp().max(1e-8);
+                (mu, mu)
+            }
+            InverseGaussianLink::InverseSquared => {
+                let safe_eta = eta.max(1e-24);
+                let mu = (1.0 / safe_eta.sqrt()).max(1e-8);
+                // dmu/deta = -0.5 * mu^3
+                (mu, -0.5 * mu * mu * mu)
+            }
+        }
+    }
+}
+
+/// Inverse-Gaussian regression result for positive continuous outcomes with
+/// variance function `V(μ) = μ³`.
+#[derive(Debug, Clone)]
+pub struct InverseGaussianResult {
+    pub coefficients: Vec<f64>,
+    pub std_errors: Vec<f64>,
+    pub z_statistics: Vec<f64>,
+    pub p_values: Vec<f64>,
+    pub covariance_matrix: Vec<Vec<f64>>,
+    pub fitted_values: Vec<f64>,
+    pub log_likelihood: f64,
+    pub null_log_likelihood: f64,
+    pub pseudo_r_squared: f64,
+    pub deviance: f64,
+    pub pearson_chi_squared: f64,
+    /// Moment (Pearson chi-squared / df_resid) estimate of the inverse-Gaussian
+    /// dispersion parameter; matches statsmodels' default `scale`.
+    pub dispersion: f64,
+    pub aic: f64,
+    pub bic: f64,
+    pub n: usize,
+    pub k: usize,
+    pub feature_names: Vec<String>,
+    link: InverseGaussianLink,
+    iterations: usize,
+}
+
+impl InverseGaussianResult {
+    /// Number of IRLS iterations used to fit the model.
+    pub fn iterations(&self) -> usize {
+        self.iterations
+    }
+
+    /// Link function used to fit the model.
+    pub fn link(&self) -> InverseGaussianLink {
+        self.link
+    }
+}
+
+/// Inverse-Gaussian regression builder for positive continuous outcomes with
+/// variance `V(μ) = μ³`.
+pub struct InverseGaussian {
+    feature_names: Vec<String>,
+    add_intercept: bool,
+    max_iter: usize,
+    tolerance: f64,
+    link: InverseGaussianLink,
+}
+
+impl Default for InverseGaussian {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl InverseGaussian {
+    /// Create a new inverse-Gaussian regression builder. An intercept is added
+    /// by default, and the link defaults to [`InverseGaussianLink::Log`],
+    /// matching `statsmodels.genmod.families.InverseGaussian(Log())`.
+    pub fn new() -> Self {
+        Self {
+            feature_names: Vec::new(),
+            add_intercept: true,
+            max_iter: 100,
+            tolerance: 1e-8,
+            link: InverseGaussianLink::Log,
+        }
+    }
+
+    /// Set human-readable names for predictor columns.
+    pub fn with_feature_names(mut self, names: Vec<String>) -> Self {
+        self.feature_names = names;
+        self
+    }
+
+    /// Fit without an intercept.
+    pub fn no_intercept(mut self) -> Self {
+        self.add_intercept = false;
+        self
+    }
+
+    /// Set the link function. Defaults to [`InverseGaussianLink::Log`].
+    pub fn with_link(mut self, link: InverseGaussianLink) -> Self {
+        self.link = link;
+        self
+    }
+
+    /// Set maximum IRLS iterations.
+    pub fn max_iter(mut self, max_iter: usize) -> Self {
+        self.max_iter = max_iter;
+        self
+    }
+
+    /// Set convergence tolerance on the largest coefficient update.
+    pub fn tolerance(mut self, tolerance: f64) -> Self {
+        self.tolerance = tolerance;
+        self
+    }
+
+    /// Fit an inverse-Gaussian GLM using IRLS (Fisher scoring).
+    ///
+    /// For the default log link, weights and working responses follow
+    /// `V(μ)=μ³`, `μ=exp(η)`, `w_i=1/μ`, `z_i=η+(y-μ)/μ`.
+    pub fn fit(&self, x: &[Vec<f64>], y: &[f64]) -> Result<InverseGaussianResult> {
+        let n = y.len();
+        if n < 2 {
+            return Err(InferustError::InsufficientData { needed: 2, got: n });
+        }
+        if x.len() != n {
+            return Err(InferustError::DimensionMismatch {
+                x_rows: x.len(),
+                y_len: n,
+            });
+        }
+        if let Some(value) = y.iter().find(|value| **value <= 0.0 || !value.is_finite()) {
+            return Err(InferustError::InvalidInput(format!(
+                "inverse-Gaussian regression requires finite, strictly positive y values, got {value}"
+            )));
+        }
+
+        let p = x[0].len();
+        let ncols = if self.add_intercept { p + 1 } else { p };
+        if n <= ncols {
+            return Err(InferustError::InsufficientData {
+                needed: ncols + 1,
+                got: n,
+            });
+        }
+
+        let mut design = Vec::with_capacity(n * ncols);
+        for row in x {
+            if row.len() != p {
+                return Err(InferustError::InvalidInput(
+                    "all rows in X must have the same length".into(),
+                ));
+            }
+            if self.add_intercept {
+                design.push(1.0);
+            }
+            design.extend_from_slice(row);
+        }
+
+        let x_mat = DMatrix::from_row_slice(n, ncols, &design);
+        let y_mean = y.iter().sum::<f64>() / n as f64;
+
+        let mut eta: Vec<f64> = y
+            .iter()
+            .map(|&yi| self.link.linkfun(((yi + y_mean) / 2.0).max(1e-8)))
+            .collect();
+        let mut beta = DVector::zeros(ncols);
+        let mut converged = false;
+        let mut iterations = 0;
+
+        for iter in 0..self.max_iter {
+            iterations = iter + 1;
+            let mut w = vec![0.0; n];
+            let mut z = vec![0.0; n];
+            for i in 0..n {
+                let (mu_i, dmu_deta_i) = self.link.mu_and_derivative(eta[i]);
+                let safe_slope = if dmu_deta_i.abs() < 1e-12 {
+                    dmu_deta_i.signum() * 1e-12
+                } else {
+                    dmu_deta_i
+                };
+                // V(mu) = mu^3; w = (dmu/deta)^2 / V(mu)
+                let variance = (mu_i * mu_i * mu_i).max(1e-24);
+                w[i] = (safe_slope * safe_slope) / variance;
+                z[i] = eta[i] + (y[i] - mu_i) / safe_slope;
+            }
+
+            let new_beta = irls_weighted_solve(&x_mat, &w, &z)?;
+            let max_delta = (&new_beta - &beta)
+                .iter()
+                .map(|v| v.abs())
+                .fold(0.0_f64, f64::max);
+            beta = new_beta;
+            let eta_vec = &x_mat * &beta;
+            eta = eta_vec.iter().copied().collect();
+            if max_delta < self.tolerance {
+                converged = true;
+                break;
+            }
+        }
+
+        if !converged {
+            return Err(InferustError::InvalidInput(format!(
+                "inverse-Gaussian regression failed to converge in {} iterations",
+                self.max_iter
+            )));
+        }
+
+        let fitted_values: Vec<f64> = eta
+            .iter()
+            .map(|&e| self.link.linkinv(e).max(1e-12))
+            .collect();
+
+        let mut w_final = vec![0.0; n];
+        for i in 0..n {
+            let (mu_i, dmu_deta_i) = self.link.mu_and_derivative(eta[i]);
+            let safe_slope = if dmu_deta_i.abs() < 1e-12 {
+                dmu_deta_i.signum() * 1e-12
+            } else {
+                dmu_deta_i
+            };
+            let variance = (mu_i * mu_i * mu_i).max(1e-24);
+            w_final[i] = (safe_slope * safe_slope) / variance;
+        }
+        let w_diag = DMatrix::from_diagonal(&DVector::from_vec(w_final));
+        let xtwx = x_mat.transpose() * &w_diag * &x_mat;
+
+        let pearson_chi_squared: f64 = y
+            .iter()
+            .zip(fitted_values.iter())
+            .map(|(yi, mui)| {
+                let mu = mui.max(1e-12);
+                (yi - mu).powi(2) / (mu * mu * mu).max(1e-24)
+            })
+            .sum();
+        let df_resid = (n - ncols) as f64;
+        let dispersion = pearson_chi_squared / df_resid;
+
+        let cov_unscaled = xtwx.try_inverse().ok_or(InferustError::SingularMatrix)?;
+        let covariance_matrix: Vec<Vec<f64>> = (0..ncols)
+            .map(|i| {
+                (0..ncols)
+                    .map(|j| cov_unscaled[(i, j)] * dispersion)
+                    .collect()
+            })
+            .collect();
+        let coefficients: Vec<f64> = beta.iter().cloned().collect();
+        let std_errors: Vec<f64> = (0..ncols).map(|i| covariance_matrix[i][i].sqrt()).collect();
+        let z_statistics: Vec<f64> = coefficients
+            .iter()
+            .zip(std_errors.iter())
+            .map(|(coef, se)| coef / se)
+            .collect();
+        let normal = Normal::new(0.0, 1.0)
+            .map_err(|_| InferustError::InvalidInput("invalid normal distribution".into()))?;
+        let p_values = z_statistics
+            .iter()
+            .map(|z| 2.0 * (1.0 - normal.cdf(z.abs())))
+            .collect::<Vec<_>>();
+
+        let log_likelihood = inverse_gaussian_log_likelihood(y, &fitted_values, dispersion);
+        let null_fitted = vec![y_mean; n];
+        let null_log_likelihood = inverse_gaussian_log_likelihood(y, &null_fitted, dispersion);
+        let pseudo_r_squared = 1.0 - log_likelihood / null_log_likelihood;
+        let deviance = inverse_gaussian_deviance(y, &fitted_values);
+        let n_params = ncols as f64;
+        let aic = -2.0 * log_likelihood + 2.0 * n_params;
+        let bic = -2.0 * log_likelihood + n_params * (n as f64).ln();
+
+        let mut feature_names = Vec::with_capacity(ncols);
+        if self.add_intercept {
+            feature_names.push("const".to_string());
+        }
+        if self.feature_names.is_empty() {
+            for i in 0..(ncols - usize::from(self.add_intercept)) {
+                feature_names.push(format!("x{}", i + 1));
+            }
+        } else {
+            feature_names.extend(self.feature_names.iter().cloned());
+        }
+
+        Ok(InverseGaussianResult {
+            coefficients,
+            std_errors,
+            z_statistics,
+            p_values,
+            covariance_matrix,
+            fitted_values,
+            log_likelihood,
+            null_log_likelihood,
+            pseudo_r_squared,
+            deviance,
+            pearson_chi_squared,
+            dispersion,
+            aic,
+            bic,
+            n,
+            k: ncols - usize::from(self.add_intercept),
+            feature_names,
+            link: self.link,
+            iterations,
+        })
+    }
+}
+
 /// Likelihood-ratio test for nested likelihood models.
 pub fn likelihood_ratio_test(
     full_log_likelihood: f64,
@@ -1636,6 +1969,31 @@ fn gamma_deviance(y: &[f64], fitted: &[f64]) -> f64 {
         .sum::<f64>()
 }
 
+fn inverse_gaussian_log_likelihood(y: &[f64], fitted: &[f64], dispersion: f64) -> f64 {
+    let phi = dispersion.max(1e-12);
+    let two_pi = std::f64::consts::PI * 2.0;
+    -0.5 * y
+        .iter()
+        .zip(fitted.iter())
+        .map(|(yi, mui)| {
+            let yv = yi.max(1e-12);
+            let mu = mui.max(1e-12);
+            (two_pi * phi * yv * yv * yv).ln() + (yv - mu).powi(2) / (phi * yv * mu * mu)
+        })
+        .sum::<f64>()
+}
+
+fn inverse_gaussian_deviance(y: &[f64], fitted: &[f64]) -> f64 {
+    y.iter()
+        .zip(fitted.iter())
+        .map(|(yi, mui)| {
+            let yv = yi.max(1e-12);
+            let mu = mui.max(1e-12);
+            (yv - mu).powi(2) / (yv * mu * mu)
+        })
+        .sum()
+}
+
 fn quadratic_form(vector: &[f64], matrix: &[Vec<f64>]) -> f64 {
     vector
         .iter()
@@ -1662,7 +2020,7 @@ fn binary_log_likelihood(y: &[f64], probabilities: &[f64]) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{Gamma, GammaLink, Logistic};
+    use super::{Gamma, GammaLink, InverseGaussian, InverseGaussianLink, Logistic};
 
     fn assert_close(actual: f64, expected: f64, tolerance: f64) {
         assert!(
@@ -2343,5 +2701,41 @@ mod tests {
     fn gamma_rejects_dimension_mismatch() {
         let (x, y) = gamma_fixture();
         assert!(Gamma::new().fit(&x[..x.len() - 1], &y).is_err());
+    }
+
+    #[test]
+    fn inverse_gaussian_log_recovers_positive_slopes() {
+        // Synthetic IG-style data with strictly positive true slopes and
+        // linearly independent predictors.
+        let x: Vec<Vec<f64>> = (0..40)
+            .map(|i| {
+                let t = i as f64 / 10.0;
+                vec![t, ((i % 7) as f64) * 0.3]
+            })
+            .collect();
+        let y: Vec<f64> = x
+            .iter()
+            .map(|row| {
+                let mu = (0.5 + 0.4 * row[0] + 0.3 * row[1]).exp();
+                (mu * 1.05).max(0.05)
+            })
+            .collect();
+        let result = InverseGaussian::new()
+            .with_link(InverseGaussianLink::Log)
+            .fit(&x, &y)
+            .unwrap();
+        assert_eq!(result.link(), InverseGaussianLink::Log);
+        assert!(result.coefficients[1] > 0.0, "x1 slope should be positive");
+        assert!(result.coefficients[2] > 0.0, "x2 slope should be positive");
+        assert!(result.fitted_values.iter().all(|&mu| mu > 0.0));
+        assert!(result.dispersion > 0.0);
+        assert!(result.iterations() > 0);
+    }
+
+    #[test]
+    fn inverse_gaussian_rejects_non_positive_y() {
+        let x = vec![vec![1.0], vec![2.0], vec![3.0], vec![4.0]];
+        let y = vec![1.0, 0.0, 2.0, 3.0];
+        assert!(InverseGaussian::new().fit(&x, &y).is_err());
     }
 }

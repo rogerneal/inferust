@@ -1,5 +1,8 @@
 use crate::error::{InferustError, Result};
-use crate::glm::{Gamma, GammaResult, Logistic, LogisticResult, Poisson, PoissonResult};
+use crate::glm::{
+    Gamma, GammaResult, InverseGaussian, InverseGaussianResult, Logistic, LogisticResult, Poisson,
+    PoissonResult,
+};
 use crate::regression::{Ols, OlsResult};
 
 /// Common GLM families with canonical links for first-pass statsmodels-style workflows.
@@ -8,17 +11,18 @@ use crate::regression::{Ols, OlsResult};
 /// canonical `InversePower` link. For a `Log` or `Identity` link, build the
 /// model directly with [`crate::glm::Gamma::with_link`] instead of going
 /// through this generic front-end.
+///
+/// `InverseGaussian` dispatches to [`crate::glm::InverseGaussian::new`], which
+/// uses the `Log` link (matching `statsmodels` `InverseGaussian(Log())`). For
+/// the canonical `InverseSquared` link, use
+/// [`crate::glm::InverseGaussian::with_link`] directly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GlmFamily {
     Gaussian,
     Binomial,
     Poisson,
     Gamma,
-    /// Positive continuous outcomes with inverse-Gaussian variance.
-    ///
-    /// Not implemented yet: [`Glm::fit`] returns an error for this variant.
-    /// Use a dedicated inverse-Gaussian estimator when one lands; do not treat
-    /// this as Gamma.
+    /// Positive continuous outcomes with inverse-Gaussian variance `V(μ)=μ³`.
     InverseGaussian,
 }
 
@@ -29,7 +33,7 @@ pub enum GlmResult {
     Binomial(LogisticResult),
     Poisson(PoissonResult),
     Gamma(GammaResult),
-    InverseGaussian(GammaResult),
+    InverseGaussian(InverseGaussianResult),
 }
 
 /// Small generic GLM front-end that dispatches to the crate's concrete model engines.
@@ -70,9 +74,10 @@ impl Glm {
                 .with_feature_names(self.feature_names.clone())
                 .fit(x, y)
                 .map(GlmResult::Gamma),
-            GlmFamily::InverseGaussian => Err(InferustError::InvalidInput(
-                "GlmFamily::InverseGaussian is not implemented yet; use Gamma for gamma-family outcomes, or wait for a dedicated inverse-Gaussian estimator".into(),
-            )),
+            GlmFamily::InverseGaussian => InverseGaussian::new()
+                .with_feature_names(self.feature_names.clone())
+                .fit(x, y)
+                .map(GlmResult::InverseGaussian),
         }
     }
 }
@@ -83,7 +88,8 @@ impl GlmResult {
             GlmResult::Gaussian(r) => &r.coefficients,
             GlmResult::Binomial(r) => &r.coefficients,
             GlmResult::Poisson(r) => &r.coefficients,
-            GlmResult::Gamma(r) | GlmResult::InverseGaussian(r) => &r.coefficients,
+            GlmResult::Gamma(r) => &r.coefficients,
+            GlmResult::InverseGaussian(r) => &r.coefficients,
         }
     }
 }
@@ -133,7 +139,30 @@ mod tests {
     }
 
     #[test]
+    fn generic_glm_dispatches_to_inverse_gaussian() {
+        let x = vec![
+            vec![1.0],
+            vec![2.0],
+            vec![3.0],
+            vec![4.0],
+            vec![5.0],
+            vec![6.0],
+        ];
+        let y = vec![2.1, 3.4, 4.5, 6.0, 8.1, 10.2];
+        let result = Glm::new(GlmFamily::InverseGaussian).fit(&x, &y).unwrap();
+        assert!(matches!(result, GlmResult::InverseGaussian(_)));
+    }
+
+    #[test]
     fn family_from_str_parses_gamma() {
         assert_eq!(GlmFamily::try_from("gamma").unwrap(), GlmFamily::Gamma);
+    }
+
+    #[test]
+    fn family_from_str_parses_inverse_gaussian() {
+        assert_eq!(
+            GlmFamily::try_from("invgauss").unwrap(),
+            GlmFamily::InverseGaussian
+        );
     }
 }

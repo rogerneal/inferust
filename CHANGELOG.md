@@ -2,6 +2,24 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.6.0] - 2026-08-11
+
+### Added
+
+- **Inverse Gaussian GLM** - `InverseGaussian` with Log (default) and
+  InverseSquared links; wired through `GlmFamily::InverseGaussian` with parity
+  against statsmodels (`inverse_gaussian_glm`).
+- **Parity breadth** - fixtures and tests for `GaussianGam`, `Iv2Sls`,
+  `MiceImputer`, `PropensityScore::ipw`, `Sarimax` (exog OLS), `Vecm`
+  (Johansen eigenvalues/trace), and `Varmax` (per-equation OLS).
+- **Fuller GEE / mixed / robust surfaces** - z/p/rho for GEE Poisson; REML llf
+  plus variance components for mixed; sandwich bse/t/p for robust RLM.
+
+### Notes
+
+- SARIMAX / VARMAX statespace MLE and VECM β/α/Γ remain out of scope; only the
+  closed-form pieces above are audited.
+
 ## [0.5.0] - 2026-08-11
 
 ### Added

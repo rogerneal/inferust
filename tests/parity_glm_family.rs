@@ -1,7 +1,8 @@
 //! Parity for the generic GLM front-end against dedicated estimators / fixtures.
 //!
 //! Gaussian and Poisson were covered first. Binomial routes through `Logistic`
-//! (`logit_small`); Gamma through the canonical InversePower fit (`gamma_glm`).
+//! (`logit_small`); Gamma through the canonical InversePower fit (`gamma_glm`);
+//! InverseGaussian through the Log-link fit (`inverse_gaussian_glm`).
 
 mod common;
 
@@ -129,15 +130,25 @@ fn parity_glm_gamma_matches_gamma() {
 }
 
 #[test]
-fn glm_inverse_gaussian_is_unsupported() {
-    let x = vec![vec![1.0], vec![2.0], vec![3.0]];
-    let y = vec![1.0, 2.0, 3.0];
-    let err = Glm::new(GlmFamily::InverseGaussian)
+fn parity_glm_inverse_gaussian_matches_fixture() {
+    let fx = load_fixture("inverse_gaussian_glm");
+    let (x, y) = xy(&fx);
+    let k = x[0].len();
+    let result = Glm::new(GlmFamily::InverseGaussian)
+        .with_feature_names((1..=k).map(|i| format!("x{i}")).collect())
         .fit(&x, &y)
-        .expect_err("InverseGaussian should be unsupported");
-    let msg = format!("{err}");
-    assert!(
-        msg.to_ascii_lowercase().contains("inverse"),
-        "unexpected error: {msg}"
+        .expect("GLM InverseGaussian fit failed");
+    let GlmResult::InverseGaussian(ig) = result else {
+        panic!("expected InverseGaussian result");
+    };
+    assert_parity(
+        "glm_inverse_gaussian_log",
+        vec![
+            check_vec("params", &ig.coefficients, &as_f64_vec(&fx["params"]), 1e-5),
+            check_vec("bse", &ig.std_errors, &as_f64_vec(&fx["bse"]), 1e-5),
+            check_scalar("llf", ig.log_likelihood, as_f64(&fx["llf"]), 1e-5),
+            check_scalar("deviance", ig.deviance, as_f64(&fx["deviance"]), 1e-4),
+            check_scalar("scale", ig.dispersion, as_f64(&fx["scale"]), 1e-4),
+        ],
     );
 }

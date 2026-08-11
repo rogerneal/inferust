@@ -18,11 +18,31 @@ fn parity_robust_small() {
 
     assert_parity(
         "robust_small",
-        vec![check_vec(
-            "params",
-            &result.fit.coefficients,
-            &as_f64_vec(&fx["params"]),
-            1e-4,
-        )],
+        vec![
+            check_vec(
+                "params",
+                &result.fit.coefficients,
+                &as_f64_vec(&fx["params"]),
+                1e-4,
+            ),
+            check_vec(
+                "bse",
+                &result.robust_std_errors,
+                &as_f64_vec(&fx["bse"]),
+                5e-3,
+            ),
+            check_vec(
+                "tvalues",
+                &result.robust_t_statistics,
+                &as_f64_vec(&fx["tvalues"]),
+                5e-3,
+            ),
+            check_vec(
+                "pvalues",
+                &result.robust_p_values,
+                &as_f64_vec(&fx["pvalues"]),
+                5e-3,
+            ),
+        ],
     );
 }
