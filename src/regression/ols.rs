@@ -1,3 +1,5 @@
+use std::fmt;
+
 use nalgebra::{DMatrix, DVector};
 use statrs::distribution::{ChiSquared, ContinuousCDF, FisherSnedecor, Normal, StudentsT};
 
@@ -94,35 +96,55 @@ pub struct OlsDiagnostics {
     pub condition_number: f64,
 }
 
-impl OlsResult {
-    /// Print a statsmodels-style summary table.
-    pub fn print_summary(&self) {
-        println!();
-        println!("═══════════════════════════════════════════════════════════════════");
-        println!("{:^67}", format!("{} Regression Results", self.model_name));
-        println!("═══════════════════════════════════════════════════════════════════");
-        println!(" Dep. variable: y          Observations  : {}", self.n);
-        println!(
+impl fmt::Display for OlsResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f)?;
+        writeln!(
+            f,
+            "═══════════════════════════════════════════════════════════════════"
+        )?;
+        writeln!(
+            f,
+            "{:^67}",
+            format!("{} Regression Results", self.model_name)
+        )?;
+        writeln!(
+            f,
+            "═══════════════════════════════════════════════════════════════════"
+        )?;
+        writeln!(f, " Dep. variable: y          Observations  : {}", self.n)?;
+        writeln!(
+            f,
             " R²           : {:.6}   Adj. R²       : {:.6}",
             self.r_squared, self.adj_r_squared
-        );
-        println!(
+        )?;
+        writeln!(
+            f,
             " F-statistic  : {:.4}    F p-value     : {:.6}",
             self.f_statistic, self.f_p_value
-        );
-        println!(
+        )?;
+        writeln!(
+            f,
             " AIC          : {:.4}    BIC           : {:.4}",
             self.aic, self.bic
-        );
-        println!(" Covariance   : {}", self.covariance.label());
-        println!("───────────────────────────────────────────────────────────────────");
-        println!(
+        )?;
+        writeln!(f, " Covariance   : {}", self.covariance.label())?;
+        writeln!(
+            f,
+            "───────────────────────────────────────────────────────────────────"
+        )?;
+        writeln!(
+            f,
             "{:<22} {:>11} {:>11} {:>9} {:>10}",
             "Variable", "Coef", "Std Err", "t", "P>|t|"
-        );
-        println!("───────────────────────────────────────────────────────────────────");
+        )?;
+        writeln!(
+            f,
+            "───────────────────────────────────────────────────────────────────"
+        )?;
         for i in 0..self.feature_names.len() {
-            println!(
+            writeln!(
+                f,
                 "{:<22} {:>11.6} {:>11.6} {:>9.4} {:>10.6}  {}",
                 self.feature_names[i],
                 self.coefficients[i],
@@ -130,28 +152,56 @@ impl OlsResult {
                 self.t_statistics[i],
                 self.p_values[i],
                 sig_stars(self.p_values[i]),
-            );
+            )?;
         }
-        println!("───────────────────────────────────────────────────────────────────");
+        writeln!(
+            f,
+            "───────────────────────────────────────────────────────────────────"
+        )?;
         if let Ok(diagnostics) = self.diagnostics() {
-            println!(
+            writeln!(
+                f,
                 " Durbin-Watson: {:>8.4}   Jarque-Bera: {:>10.4}   Prob(JB): {:>9.6}",
                 diagnostics.durbin_watson, diagnostics.jarque_bera, diagnostics.jarque_bera_p_value
-            );
-            println!(
+            )?;
+            writeln!(
+                f,
                 " Skew          : {:>8.4}   Kurtosis    : {:>10.4}   Cond. No.: {:>9.4}",
                 diagnostics.skewness, diagnostics.kurtosis, diagnostics.condition_number
-            );
+            )?;
             if diagnostics.condition_number > 30.0 {
-                println!(
+                writeln!(
+                    f,
                     " Note: Large condition number may indicate multicollinearity or numerical instability."
-                );
+                )?;
             }
-            println!("───────────────────────────────────────────────────────────────────");
+            writeln!(
+                f,
+                "───────────────────────────────────────────────────────────────────"
+            )?;
         }
-        println!(" Significance codes:  *** p<0.001  ** p<0.01  * p<0.05  . p<0.1");
-        println!("═══════════════════════════════════════════════════════════════════");
-        println!();
+        writeln!(
+            f,
+            " Significance codes:  *** p<0.001  ** p<0.01  * p<0.05  . p<0.1"
+        )?;
+        writeln!(
+            f,
+            "═══════════════════════════════════════════════════════════════════"
+        )?;
+        writeln!(f)?;
+        Ok(())
+    }
+}
+
+impl OlsResult {
+    /// Statsmodels-style summary table as a `String`.
+    pub fn summary(&self) -> String {
+        self.to_string()
+    }
+
+    /// Print a statsmodels-style summary table.
+    pub fn print_summary(&self) {
+        print!("{}", self);
     }
 
     /// Wald test of a linear restriction `R·β = q`.
@@ -309,44 +359,7 @@ pub enum OlsSolver {
 ///   heteroskedasticity. `Hc1` is statsmodels' default for `HC1`.
 /// - [`Hac`](OlsCovariance::Hac) — Newey-West HAC; robust to both heteroskedasticity *and*
 ///   serial autocorrelation. Choose `lags` using `floor(4 * (n/100)^(2/9))` or `floor(n^(1/3))`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum OlsCovariance {
-    /// Classical homoskedastic covariance estimator.
-    Nonrobust,
-    /// White's HC0 heteroskedasticity-consistent covariance estimator.
-    Hc0,
-    /// HC0 with small-sample correction n / df_resid.
-    Hc1,
-    /// HC0 adjusted by leverage: e_i^2 / (1 - h_i).
-    Hc2,
-    /// HC0 adjusted by squared leverage: e_i^2 / (1 - h_i)^2.
-    Hc3,
-    /// Newey-West heteroskedasticity and autocorrelation consistent (HAC) estimator.
-    ///
-    /// Uses the Bartlett kernel with the specified number of lags.
-    /// Appropriate when residuals may be serially correlated (e.g. time series data).
-    Hac { lags: usize },
-    /// One-way cluster-robust sandwich covariance.
-    Cluster { groups: Vec<usize> },
-}
-
-impl OlsCovariance {
-    fn label(&self) -> &'static str {
-        match self {
-            OlsCovariance::Nonrobust => "nonrobust",
-            OlsCovariance::Hc0 => "HC0",
-            OlsCovariance::Hc1 => "HC1",
-            OlsCovariance::Hc2 => "HC2",
-            OlsCovariance::Hc3 => "HC3",
-            OlsCovariance::Hac { .. } => "HAC (Newey-West)",
-            OlsCovariance::Cluster { .. } => "cluster",
-        }
-    }
-
-    fn uses_t_distribution(&self) -> bool {
-        matches!(self, OlsCovariance::Nonrobust)
-    }
-}
+pub use crate::covariance::CovType as OlsCovariance;
 
 /// Ordinary Least Squares regression.
 ///

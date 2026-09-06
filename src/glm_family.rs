@@ -1,3 +1,4 @@
+use crate::covariance::CovType;
 use crate::error::{InferustError, Result};
 use crate::glm::{
     Gamma, GammaResult, InverseGaussian, InverseGaussianResult, Logistic, LogisticResult, Poisson,
@@ -41,6 +42,8 @@ pub enum GlmResult {
 pub struct Glm {
     family: GlmFamily,
     feature_names: Vec<String>,
+    add_intercept: bool,
+    covariance: CovType,
 }
 
 impl Glm {
@@ -48,6 +51,8 @@ impl Glm {
         Self {
             family,
             feature_names: Vec::new(),
+            add_intercept: true,
+            covariance: CovType::Nonrobust,
         }
     }
 
@@ -56,28 +61,68 @@ impl Glm {
         self
     }
 
+    pub fn no_intercept(mut self) -> Self {
+        self.add_intercept = false;
+        self
+    }
+
+    pub fn with_covariance(mut self, covariance: CovType) -> Self {
+        self.covariance = covariance;
+        self
+    }
+
+    pub fn robust(mut self) -> Self {
+        self.covariance = CovType::Hc1;
+        self
+    }
+
     pub fn fit(&self, x: &[Vec<f64>], y: &[f64]) -> Result<GlmResult> {
         match self.family {
-            GlmFamily::Gaussian => Ols::new()
-                .with_feature_names(self.feature_names.clone())
-                .fit(x, y)
-                .map(GlmResult::Gaussian),
-            GlmFamily::Binomial => Logistic::new()
-                .with_feature_names(self.feature_names.clone())
-                .fit(x, y)
-                .map(GlmResult::Binomial),
-            GlmFamily::Poisson => Poisson::new()
-                .with_feature_names(self.feature_names.clone())
-                .fit(x, y)
-                .map(GlmResult::Poisson),
-            GlmFamily::Gamma => Gamma::new()
-                .with_feature_names(self.feature_names.clone())
-                .fit(x, y)
-                .map(GlmResult::Gamma),
-            GlmFamily::InverseGaussian => InverseGaussian::new()
-                .with_feature_names(self.feature_names.clone())
-                .fit(x, y)
-                .map(GlmResult::InverseGaussian),
+            GlmFamily::Gaussian => {
+                let mut builder = Ols::new()
+                    .with_feature_names(self.feature_names.clone())
+                    .with_covariance(self.covariance.clone());
+                if !self.add_intercept {
+                    builder = builder.no_intercept();
+                }
+                builder.fit(x, y).map(GlmResult::Gaussian)
+            }
+            GlmFamily::Binomial => {
+                let mut builder = Logistic::new()
+                    .with_feature_names(self.feature_names.clone())
+                    .with_covariance(self.covariance.clone());
+                if !self.add_intercept {
+                    builder = builder.no_intercept();
+                }
+                builder.fit(x, y).map(GlmResult::Binomial)
+            }
+            GlmFamily::Poisson => {
+                let mut builder = Poisson::new()
+                    .with_feature_names(self.feature_names.clone())
+                    .with_covariance(self.covariance.clone());
+                if !self.add_intercept {
+                    builder = builder.no_intercept();
+                }
+                builder.fit(x, y).map(GlmResult::Poisson)
+            }
+            GlmFamily::Gamma => {
+                let mut builder = Gamma::new()
+                    .with_feature_names(self.feature_names.clone())
+                    .with_covariance(self.covariance.clone());
+                if !self.add_intercept {
+                    builder = builder.no_intercept();
+                }
+                builder.fit(x, y).map(GlmResult::Gamma)
+            }
+            GlmFamily::InverseGaussian => {
+                let mut builder = InverseGaussian::new()
+                    .with_feature_names(self.feature_names.clone())
+                    .with_covariance(self.covariance.clone());
+                if !self.add_intercept {
+                    builder = builder.no_intercept();
+                }
+                builder.fit(x, y).map(GlmResult::InverseGaussian)
+            }
         }
     }
 }

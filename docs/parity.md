@@ -253,9 +253,9 @@ These differences are documented intentionally rather than treated as bugs:
   differ by ~`1e-2` on eigenvalues / more on trace statistics for the same
   series. The `vecm_small` fixture pins inferust's algorithm (Python
   transcription) and stores the statsmodels values only as a side reference.
-- **SARIMAX / VARMAX** -  only the closed-form OLS pieces are under parity
-  (exogenous projection for SARIMAX; per-equation VAR+exog OLS for VARMAX).
-  Full statespace MLE is intentionally out of scope.
+- **SARIMAX / VARMAX** -  the default two-step OLS+SARIMA path remains the
+  parity fixture. `Sarimax::exact_mle()` is a joint Kalman likelihood (not
+  yet pinned to statsmodels `SARIMAX.fit`). VARMAX stays per-equation OLS.
 
 
 ## Future work (backlog)
@@ -263,8 +263,8 @@ These differences are documented intentionally rather than treated as bugs:
 Gaps in the audit: modules with no fixture at all, plus estimators whose fixture
 pins only part of the result surface.
 
-- **SARIMAX / VARMAX full MLE surface** -  exogenous OLS and VAR+exog OLS are
-  covered; statespace likelihood parity remains future work.
+- **SARIMAX / VARMAX full MLE surface** -  `Sarimax::exact_mle()` exists but
+  is not yet fixture-pinned; VARMAX stays per-equation OLS.
 - **VECM β / α / Γ** -  eigenvalues and trace stats are pinned; cointegrating
   vectors and short-run matrices are sign/scale-ambiguous and not yet compared.
 

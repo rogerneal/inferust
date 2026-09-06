@@ -4,6 +4,7 @@ use nalgebra::{DMatrix, DVector};
 use statrs::distribution::{Continuous, ContinuousCDF, Discrete, Normal, Poisson as StatPoisson};
 use statrs::function::gamma::digamma;
 
+use crate::covariance::{sandwich_from_scores, CovType};
 use crate::error::{InferustError, Result};
 use crate::glm::Poisson;
 use crate::irls::{accumulate_xtwx, irls_weighted_solve, mat_vec_mul};
@@ -33,6 +34,7 @@ pub struct Probit {
     feature_names: Vec<String>,
     max_iter: usize,
     tolerance: f64,
+    covariance: CovType,
 }
 
 impl Default for Probit {
@@ -47,6 +49,7 @@ impl Probit {
             feature_names: Vec::new(),
             max_iter: 100,
             tolerance: 1e-8,
+            covariance: CovType::Nonrobust,
         }
     }
 
@@ -62,6 +65,26 @@ impl Probit {
 
     pub fn tolerance(mut self, tol: f64) -> Self {
         self.tolerance = tol;
+        self
+    }
+
+    pub fn with_covariance(mut self, covariance: CovType) -> Self {
+        self.covariance = covariance;
+        self
+    }
+
+    pub fn robust(mut self) -> Self {
+        self.covariance = CovType::Hc1;
+        self
+    }
+
+    pub fn hac(mut self, lags: usize) -> Self {
+        self.covariance = CovType::Hac { lags };
+        self
+    }
+
+    pub fn cluster_robust(mut self, groups: Vec<usize>) -> Self {
+        self.covariance = CovType::Cluster { groups };
         self
     }
 
@@ -125,7 +148,25 @@ impl Probit {
             })
             .collect();
         let info = accumulate_xtwx(&x_mat, &w_f, k);
-        let cov = info.try_inverse().ok_or(InferustError::SingularMatrix)?;
+        let mut cov = info.try_inverse().ok_or(InferustError::SingularMatrix)?;
+        if !matches!(self.covariance, CovType::Nonrobust) {
+            let factors: Vec<f64> = (0..n).map(|i| y[i] - fitted_probabilities[i]).collect();
+            let scores: Vec<Vec<f64>> = (0..n)
+                .map(|i| (0..k).map(|j| x_mat[(i, j)] * factors[i]).collect())
+                .collect();
+            let leverages: Vec<f64> = (0..n)
+                .map(|i| {
+                    let mut h = 0.0;
+                    for j in 0..k {
+                        for l in 0..k {
+                            h += x_mat[(i, j)] * cov[(j, l)] * x_mat[(i, l)];
+                        }
+                    }
+                    h * w_f[i]
+                })
+                .collect();
+            cov = sandwich_from_scores(&cov, &scores, Some(&leverages), &self.covariance)?;
+        }
         let std_errors: Vec<f64> = (0..k).map(|j| cov[(j, j)].max(0.0).sqrt()).collect();
 
         let norm_dist =
@@ -210,6 +251,7 @@ pub struct NegativeBinomial {
     max_iter: usize,
     tolerance: f64,
     feature_names: Vec<String>,
+    covariance: CovType,
 }
 
 impl Default for NegativeBinomial {
@@ -225,6 +267,7 @@ impl NegativeBinomial {
             max_iter: 100,
             tolerance: 1e-6,
             feature_names: Vec::new(),
+            covariance: CovType::Nonrobust,
         }
     }
 
@@ -240,6 +283,26 @@ impl NegativeBinomial {
 
     pub fn max_iter(mut self, max_iter: usize) -> Self {
         self.max_iter = max_iter;
+        self
+    }
+
+    pub fn with_covariance(mut self, covariance: CovType) -> Self {
+        self.covariance = covariance;
+        self
+    }
+
+    pub fn robust(mut self) -> Self {
+        self.covariance = CovType::Hc1;
+        self
+    }
+
+    pub fn hac(mut self, lags: usize) -> Self {
+        self.covariance = CovType::Hac { lags };
+        self
+    }
+
+    pub fn cluster_robust(mut self, groups: Vec<usize>) -> Self {
+        self.covariance = CovType::Cluster { groups };
         self
     }
 
@@ -338,7 +401,27 @@ impl NegativeBinomial {
             .map(|&m| m / (1.0 + alpha * m))
             .collect();
         let info = accumulate_xtwx(&x_mat, &w_f, k);
-        let cov = info.try_inverse().ok_or(InferustError::SingularMatrix)?;
+        let mut cov = info.try_inverse().ok_or(InferustError::SingularMatrix)?;
+        if !matches!(self.covariance, CovType::Nonrobust) {
+            let factors: Vec<f64> = (0..n)
+                .map(|i| (y[i] - fitted_values[i]) / (1.0 + alpha * fitted_values[i]))
+                .collect();
+            let scores: Vec<Vec<f64>> = (0..n)
+                .map(|i| (0..k).map(|j| x_mat[(i, j)] * factors[i]).collect())
+                .collect();
+            let leverages: Vec<f64> = (0..n)
+                .map(|i| {
+                    let mut h = 0.0;
+                    for j in 0..k {
+                        for l in 0..k {
+                            h += x_mat[(i, j)] * cov[(j, l)] * x_mat[(i, l)];
+                        }
+                    }
+                    h * w_f[i]
+                })
+                .collect();
+            cov = sandwich_from_scores(&cov, &scores, Some(&leverages), &self.covariance)?;
+        }
         let std_errors: Vec<f64> = (0..k).map(|j| cov[(j, j)].max(0.0).sqrt()).collect();
 
         let norm_dist =

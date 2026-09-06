@@ -6,8 +6,16 @@ use crate::discrete::{
     ZeroInflatedPoissonResult,
 };
 use crate::error::{InferustError, Result};
-use crate::glm::{Logistic, LogisticResult, Poisson, PoissonResult};
+use crate::glm::{
+    Gamma, GammaResult, InverseGaussian, InverseGaussianResult, Logistic, LogisticResult, Poisson,
+    PoissonResult,
+};
+use crate::glm_family::{Glm, GlmFamily, GlmResult};
+use crate::mixed::{MixedLinearModel, MixedLinearResult};
+use crate::panel::{PanelOls, PanelReResult};
+use crate::post_estimation::{ModelResult, Prediction};
 use crate::regression::{Ols, OlsResult, QuantileRegression, QuantileRegressionResult, Wls};
+use crate::robust::{RobustLinearModel, RobustLinearResult};
 
 /// A parsed formula term — what appears between `+` / `-` signs in the RHS.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,6 +211,9 @@ fn parse_transform(tok: &str) -> Option<(&'static str, &str)> {
     None
 }
 
+/// First-class alias for formula design output. Estimators still take `&x, &y`.
+pub type Design = DesignMatrices;
+
 /// Built design matrices from a formula and a [`DataFrame`].
 #[derive(Debug, Clone)]
 pub struct DesignMatrices {
@@ -216,6 +227,13 @@ pub struct DesignMatrices {
     pub intercept: bool,
     /// Offset vector for GLM models (from `offset(...)` terms); `None` if not present.
     pub offset: Option<Vec<f64>>,
+}
+
+impl DesignMatrices {
+    /// Parse `formula` against `frame`.
+    pub fn from_formula(frame: &DataFrame, formula: &str) -> Result<Self> {
+        frame.design_matrices(formula)
+    }
 }
 
 /// Minimal named-column data frame for formula-based fitting.
@@ -639,6 +657,144 @@ impl DataFrame {
             .max_iter(300)
             .fit(&d.x, &d.y, &d.x)
     }
+
+    /// Build design matrices (`Design` is an alias for [`DesignMatrices`]).
+    pub fn design(&self, formula: &str) -> Result<Design> {
+        self.design_matrices(formula)
+    }
+
+    /// Fit Gamma regression from a formula.
+    pub fn gamma(&self, formula: &str) -> Result<GammaResult> {
+        let d = self.design_matrices(formula)?;
+        let mut builder = Gamma::new().with_feature_names(d.predictor_names);
+        if !d.intercept {
+            builder = builder.no_intercept();
+        }
+        builder.fit(&d.x, &d.y)
+    }
+
+    /// Fit inverse-Gaussian regression from a formula.
+    pub fn inverse_gaussian(&self, formula: &str) -> Result<InverseGaussianResult> {
+        let d = self.design_matrices(formula)?;
+        let mut builder = InverseGaussian::new().with_feature_names(d.predictor_names);
+        if !d.intercept {
+            builder = builder.no_intercept();
+        }
+        builder.fit(&d.x, &d.y)
+    }
+
+    /// Fit a generic GLM from a formula and family.
+    pub fn glm(&self, formula: &str, family: GlmFamily) -> Result<GlmResult> {
+        let d = self.design_matrices(formula)?;
+        if family == GlmFamily::Poisson {
+            if let Some(offset) = &d.offset {
+                let mut builder = Poisson::new()
+                    .with_feature_names(d.predictor_names.clone())
+                    .with_offset(offset.clone());
+                if !d.intercept {
+                    builder = builder.no_intercept();
+                }
+                return builder.fit(&d.x, &d.y).map(GlmResult::Poisson);
+            }
+        }
+        let mut builder = Glm::new(family).with_feature_names(d.predictor_names);
+        if !d.intercept {
+            builder = builder.no_intercept();
+        }
+        builder.fit(&d.x, &d.y)
+    }
+
+    /// Fit Huber robust linear regression from a formula.
+    pub fn robust(&self, formula: &str) -> Result<RobustLinearResult> {
+        let d = self.design_matrices(formula)?;
+        RobustLinearModel::new()
+            .with_feature_names(d.predictor_names)
+            .fit(&d.x, &d.y)
+    }
+
+    /// Fit entity fixed-effects panel OLS from a formula.
+    pub fn panel_fe(&self, formula: &str, entity: &str) -> Result<OlsResult> {
+        let d = self.design_matrices(formula)?;
+        let entities = self.group_ids(entity)?;
+        PanelOls::new()
+            .with_feature_names(d.predictor_names)
+            .fit_entity_fe(&d.x, &d.y, &entities)
+    }
+
+    /// Fit time fixed-effects panel OLS from a formula.
+    pub fn panel_time_fe(&self, formula: &str, time: &str) -> Result<OlsResult> {
+        let d = self.design_matrices(formula)?;
+        let times = self.group_ids(time)?;
+        PanelOls::new()
+            .with_feature_names(d.predictor_names)
+            .fit_time_fe(&d.x, &d.y, &times)
+    }
+
+    /// Fit random-effects (Swamy–Arora) panel GLS from a formula.
+    pub fn panel_re(&self, formula: &str, entity: &str) -> Result<PanelReResult> {
+        let d = self.design_matrices(formula)?;
+        let entities = self.group_ids(entity)?;
+        PanelOls::new()
+            .with_feature_names(d.predictor_names)
+            .fit_random_effects(&d.x, &d.y, &entities)
+    }
+
+    /// Fit a random-intercept mixed model from a formula.
+    pub fn mixed(&self, formula: &str, group: &str) -> Result<MixedLinearResult> {
+        let d = self.design_matrices(formula)?;
+        let groups = self.group_ids(group)?;
+        MixedLinearModel::new()
+            .with_feature_names(d.predictor_names)
+            .fit_random_intercept(&d.x, &d.y, &groups)
+    }
+
+    /// Predict from a fitted result using the same formula (response is ignored).
+    pub fn predict<R: ModelResult>(&self, formula: &str, result: &R) -> Result<Prediction> {
+        let d = self.design_matrices(formula)?;
+        result.predict(&d.x)
+    }
+
+    /// Predict with a Wald interval from a fitted result and formula.
+    pub fn predict_interval<R: ModelResult>(
+        &self,
+        formula: &str,
+        result: &R,
+        alpha: f64,
+    ) -> Result<Prediction> {
+        let d = self.design_matrices(formula)?;
+        result.predict_interval(&d.x, alpha)
+    }
+
+    fn group_ids(&self, name: &str) -> Result<Vec<usize>> {
+        if let Ok(values) = self.column(name) {
+            let all_int = values
+                .iter()
+                .all(|v| v.is_finite() && *v >= 0.0 && v.fract() == 0.0);
+            if all_int {
+                return Ok(values.iter().map(|v| *v as usize).collect());
+            }
+            let mut levels = values.to_vec();
+            levels.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            levels.dedup();
+            return Ok(values
+                .iter()
+                .map(|v| levels.iter().position(|u| u == v).expect("level present"))
+                .collect());
+        }
+        let labels = self.categorical_column(name)?;
+        let mut levels = labels.to_vec();
+        levels.sort();
+        levels.dedup();
+        Ok(labels
+            .iter()
+            .map(|label| {
+                levels
+                    .iter()
+                    .position(|u| u == label)
+                    .expect("level present")
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
@@ -898,5 +1054,65 @@ mod tests {
         let result = frame.logistic("y ~ x1 + x2").unwrap();
         assert_close(result.coefficients[0], -1.7689272112231273, 1e-8);
         assert_eq!(result.feature_names, vec!["const", "x1", "x2"]);
+    }
+
+    #[test]
+    fn formula_gamma_and_predict_round_trip() {
+        use crate::post_estimation::ModelResult;
+        let frame = DataFrame::new()
+            .with_column("x", vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+            .unwrap()
+            .with_column("y", vec![2.0, 3.2, 4.1, 6.0, 7.5, 9.8])
+            .unwrap();
+        let fit = frame.gamma("y ~ x").unwrap();
+        let pred = frame.predict("y ~ x", &fit).unwrap();
+        assert_eq!(pred.mean.len(), 6);
+        assert!(
+            (pred.mean[0]
+                - ModelResult::predict(&fit, &frame.design("y ~ x").unwrap().x)
+                    .unwrap()
+                    .mean[0])
+                .abs()
+                < 1e-12
+        );
+        let iv = frame.predict_interval("y ~ x", &fit, 0.05).unwrap();
+        assert!(iv.lower.unwrap()[0] <= iv.mean[0]);
+    }
+
+    #[test]
+    fn formula_robust_and_glm_dispatch() {
+        use crate::glm_family::GlmFamily;
+        let result = frame().robust("y ~ x1 + x2").unwrap();
+        assert_eq!(result.fit.feature_names, vec!["const", "x1", "x2"]);
+        let glm = frame().glm("y ~ x1 + x2", GlmFamily::Gaussian).unwrap();
+        assert_eq!(glm.coefficients().len(), 3);
+    }
+
+    #[test]
+    fn formula_panel_and_mixed() {
+        let mut entity = Vec::new();
+        let mut x = Vec::new();
+        let mut y = Vec::new();
+        for e in 1..=4 {
+            for t in 0..4 {
+                entity.push(e as f64);
+                let xi = e as f64 * 0.5 + t as f64;
+                x.push(xi);
+                y.push(e as f64 + 2.0 * xi + 0.05 * t as f64);
+            }
+        }
+        let frame = DataFrame::new()
+            .with_column("entity", entity)
+            .unwrap()
+            .with_column("x", x)
+            .unwrap()
+            .with_column("y", y)
+            .unwrap();
+        let fe = frame.panel_fe("y ~ x", "entity").unwrap();
+        assert!(fe.coefficients[0].is_finite());
+        let re = frame.panel_re("y ~ x", "entity").unwrap();
+        assert!(re.coefficients[1].is_finite());
+        let mixed = frame.mixed("y ~ x", "entity").unwrap();
+        assert_eq!(mixed.group_count, 4);
     }
 }

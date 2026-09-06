@@ -432,9 +432,7 @@ impl Plot {
         // Horizontal zero line
         if ymin <= 0.0 && ymax >= 0.0 {
             let r = row_of(0.0);
-            for cell in &mut grid[r] {
-                *cell = '-';
-            }
+            grid[r].fill('-');
         }
 
         for s in &self.series {

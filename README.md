@@ -24,7 +24,7 @@
 | `hypothesis::tukey` | Tukey HSD post-hoc pairwise comparisons (Tukey-Kramer adjusted) | `statsmodels.stats.multicomp.pairwise_tukeyhsd` |
 | `hypothesis::multicomp` | Multiple-testing p-value correction (Bonferroni, Holm, Benjamini-Hochberg, Benjamini-Yekutieli) | `statsmodels.stats.multitest.multipletests` |
 | `descriptive::Summary` | mean, std, variance, min/max, quartiles, skewness, excess kurtosis | `pd.Series.describe()` |
-| `data::DataFrame` | named numeric/string columns, `formula!` macro, transforms, missing-row dropping, and formula-based OLS/WLS/quantile/logistic/Poisson fitting with categorical dummy expansion | `statsmodels.formula.api` basics |
+| `data::DataFrame` | named numeric/string columns, `formula!` macro, `Design` matrices, and formula-based OLS/WLS/quantile/GLM/panel/robust/mixed fitting plus `predict` / `predict_interval` | `statsmodels.formula.api` basics |
 | `glm::Logistic` / `Poisson` / `Gamma` | binary logistic, Poisson count, and Gamma (positive continuous) regression with MLE/IRLS estimates, Wald inference, covariance, residual diagnostics, likelihood-ratio tests, prediction intervals, classification metrics, and post-estimation helpers | `statsmodels.Logit().fit()`, `statsmodels.GLM(..., Poisson()).fit()`, `statsmodels.GLM(..., Gamma()).fit()` |
 | `gam::GaussianGam` | additive Gaussian regression with spline basis expansion and statsmodels-style OLS summaries on the expanded design | `statsmodels.gam.GLMGam` basics |
 | `gmm::Iv2Sls` | instrumental variables regression via two-stage least squares with t inference and summary output | `statsmodels.sandbox.regression.gmm.IV2SLS`, `statsmodels.gmm` basics |
@@ -33,7 +33,7 @@
 | `multivariate` | one-way MANOVA and PCA starters | `statsmodels.multivariate` basics |
 | `imputation` | mean imputation and MICE-style chained equations | `statsmodels.imputation.mice` basics |
 | `treatment` | propensity scores, IPW ATE/ATT, and balance diagnostics | `statsmodels.treatment` basics |
-| `statespace` | scalar Kalman filter and local-level state-space smoothing/forecasting | `statsmodels.tsa.statespace` basics |
+| `statespace` | linear-Gaussian Kalman filter, RTS smoother, `Z`/`T`/`R`/`H`/`Q` accessors, and forecasts | `statsmodels.tsa.statespace` basics |
 | `time_series` | AR, ARIMA, SARIMA/SARIMAX, VAR, VECM, VARMAX starters plus ACF, PACF, Ljung-Box, ADF, and KPSS diagnostics, and forecast standard errors with confidence intervals for ARIMA/SARIMA/VAR | `statsmodels.tsa` basics, `get_forecast().conf_int()`, `VARResults.forecast_interval` |
 | `seasonal` | classical seasonal decomposition (additive and multiplicative centered moving averages) and STL | `statsmodels.tsa.seasonal.seasonal_decompose`, `STL` |
 | `smoothing` | simple exponential smoothing, Holt's linear and damped trend, and Holt-Winters additive/multiplicative seasonality with fitted values, SSE, and forecasts | `statsmodels.tsa.holtwinters` |
@@ -56,7 +56,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-inferust = "0.1"
+inferust = "0.8"
 ```
 
 ---
@@ -121,7 +121,7 @@ let frame = DataFrame::new()
 let result = frame.ols("score ~ hours + gpa").unwrap();
 ```
 
-Formula support includes numeric `response ~ x1 + x2` terms, treatment dummy expansion for numeric-coded or string categorical columns with `C(group)`, interactions, offsets, and no-intercept formulas. Intercepts are handled by the model builders.
+Formula support includes numeric `response ~ x1 + x2` terms, treatment dummy expansion for numeric-coded or string categorical columns with `C(group)`, interactions, offsets, and no-intercept formulas. Intercepts are handled by the model builders. The same frame also fits `gamma`, `glm(family)`, `robust`, `panel_fe` / `panel_re`, and `mixed`, and can `predict` / `predict_interval` from a fitted result.
 
 ```rust
 let frame = DataFrame::new()

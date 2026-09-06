@@ -1,6 +1,7 @@
 use nalgebra::{DMatrix, DVector};
 use statrs::distribution::{ChiSquared, ContinuousCDF, Normal};
 
+use crate::covariance::{sandwich_from_scores, CovType};
 use crate::error::{InferustError, Result};
 use crate::irls::irls_weighted_solve;
 
@@ -335,6 +336,7 @@ pub struct Logistic {
     add_intercept: bool,
     max_iter: usize,
     tolerance: f64,
+    covariance: CovType,
 }
 
 impl Default for Logistic {
@@ -351,6 +353,7 @@ impl Logistic {
             add_intercept: true,
             max_iter: 100,
             tolerance: 1e-8,
+            covariance: CovType::Nonrobust,
         }
     }
 
@@ -375,6 +378,30 @@ impl Logistic {
     /// Set convergence tolerance on the largest coefficient update.
     pub fn tolerance(mut self, tolerance: f64) -> Self {
         self.tolerance = tolerance;
+        self
+    }
+
+    /// Use a sandwich covariance estimator for standard errors.
+    pub fn with_covariance(mut self, covariance: CovType) -> Self {
+        self.covariance = covariance;
+        self
+    }
+
+    /// HC1 robust standard errors.
+    pub fn robust(mut self) -> Self {
+        self.covariance = CovType::Hc1;
+        self
+    }
+
+    /// Newey–West HAC standard errors.
+    pub fn hac(mut self, lags: usize) -> Self {
+        self.covariance = CovType::Hac { lags };
+        self
+    }
+
+    /// One-way cluster-robust standard errors.
+    pub fn cluster_robust(mut self, groups: Vec<usize>) -> Self {
+        self.covariance = CovType::Cluster { groups };
         self
     }
 
@@ -472,7 +499,16 @@ impl Logistic {
             }
         }
 
-        let cov = hessian.try_inverse().ok_or(InferustError::SingularMatrix)?;
+        let mut cov = hessian.try_inverse().ok_or(InferustError::SingularMatrix)?;
+        if !matches!(self.covariance, CovType::Nonrobust) {
+            let factors: Vec<f64> = (0..n).map(|i| y[i] - probabilities[i]).collect();
+            let weights: Vec<f64> = (0..n)
+                .map(|i| (probabilities[i] * (1.0 - probabilities[i])).max(1e-12))
+                .collect();
+            let scores = score_rows(&x_mat, &factors);
+            let leverages = glm_leverages(&x_mat, &cov, &weights);
+            cov = sandwich_from_scores(&cov, &scores, Some(&leverages), &self.covariance)?;
+        }
         let covariance_matrix: Vec<Vec<f64>> = (0..ncols)
             .map(|i| (0..ncols).map(|j| cov[(i, j)]).collect())
             .collect();
@@ -697,6 +733,7 @@ pub struct Poisson {
     tolerance: f64,
     offset: Option<Vec<f64>>,
     exposure: Option<Vec<f64>>,
+    covariance: CovType,
 }
 
 impl Default for Poisson {
@@ -715,6 +752,7 @@ impl Poisson {
             tolerance: 1e-8,
             offset: None,
             exposure: None,
+            covariance: CovType::Nonrobust,
         }
     }
 
@@ -739,6 +777,30 @@ impl Poisson {
     /// Set convergence tolerance on the largest coefficient update.
     pub fn tolerance(mut self, tolerance: f64) -> Self {
         self.tolerance = tolerance;
+        self
+    }
+
+    /// Use a sandwich covariance estimator for standard errors.
+    pub fn with_covariance(mut self, covariance: CovType) -> Self {
+        self.covariance = covariance;
+        self
+    }
+
+    /// HC1 robust standard errors.
+    pub fn robust(mut self) -> Self {
+        self.covariance = CovType::Hc1;
+        self
+    }
+
+    /// Newey–West HAC standard errors.
+    pub fn hac(mut self, lags: usize) -> Self {
+        self.covariance = CovType::Hac { lags };
+        self
+    }
+
+    /// One-way cluster-robust standard errors.
+    pub fn cluster_robust(mut self, groups: Vec<usize>) -> Self {
+        self.covariance = CovType::Cluster { groups };
         self
     }
 
@@ -851,7 +913,14 @@ impl Poisson {
             }
         }
 
-        let cov = hessian.try_inverse().ok_or(InferustError::SingularMatrix)?;
+        let mut cov = hessian.try_inverse().ok_or(InferustError::SingularMatrix)?;
+        if !matches!(self.covariance, CovType::Nonrobust) {
+            let factors: Vec<f64> = (0..n).map(|i| y[i] - fitted[i]).collect();
+            let weights: Vec<f64> = (0..n).map(|i| fitted[i].max(1e-12)).collect();
+            let scores = score_rows(&x_mat, &factors);
+            let leverages = glm_leverages(&x_mat, &cov, &weights);
+            cov = sandwich_from_scores(&cov, &scores, Some(&leverages), &self.covariance)?;
+        }
         let covariance_matrix: Vec<Vec<f64>> = (0..ncols)
             .map(|i| (0..ncols).map(|j| cov[(i, j)]).collect())
             .collect();
@@ -1136,6 +1205,7 @@ pub struct Gamma {
     max_iter: usize,
     tolerance: f64,
     link: GammaLink,
+    covariance: CovType,
 }
 
 impl Default for Gamma {
@@ -1157,6 +1227,7 @@ impl Gamma {
             max_iter: 100,
             tolerance: 1e-8,
             link: GammaLink::InversePower,
+            covariance: CovType::Nonrobust,
         }
     }
 
@@ -1187,6 +1258,30 @@ impl Gamma {
     /// Set the link function. Defaults to [`GammaLink::InversePower`].
     pub fn with_link(mut self, link: GammaLink) -> Self {
         self.link = link;
+        self
+    }
+
+    /// Use a sandwich covariance estimator for standard errors.
+    pub fn with_covariance(mut self, covariance: CovType) -> Self {
+        self.covariance = covariance;
+        self
+    }
+
+    /// HC1 robust standard errors.
+    pub fn robust(mut self) -> Self {
+        self.covariance = CovType::Hc1;
+        self
+    }
+
+    /// Newey–West HAC standard errors.
+    pub fn hac(mut self, lags: usize) -> Self {
+        self.covariance = CovType::Hac { lags };
+        self
+    }
+
+    /// One-way cluster-robust standard errors.
+    pub fn cluster_robust(mut self, groups: Vec<usize>) -> Self {
+        self.covariance = CovType::Cluster { groups };
         self
     }
 
@@ -1302,7 +1397,7 @@ impl Gamma {
             };
             w_final[i] = (safe_slope * safe_slope) / (mu_i * mu_i);
         }
-        let w_diag = DMatrix::from_diagonal(&DVector::from_vec(w_final));
+        let w_diag = DMatrix::from_diagonal(&DVector::from_column_slice(&w_final));
         let xtwx = x_mat.transpose() * &w_diag * &x_mat;
 
         let pearson_chi_squared: f64 = y
@@ -1314,12 +1409,21 @@ impl Gamma {
         let dispersion = pearson_chi_squared / df_resid;
 
         let cov_unscaled = xtwx.try_inverse().ok_or(InferustError::SingularMatrix)?;
+        let cov = if matches!(self.covariance, CovType::Nonrobust) {
+            &cov_unscaled * dispersion
+        } else {
+            let mut factors = vec![0.0; n];
+            for i in 0..n {
+                let (mu_i, dmu_deta_i) = self.link.mu_and_derivative(eta[i]);
+                let variance = (mu_i * mu_i).max(1e-24);
+                factors[i] = (y[i] - mu_i) * dmu_deta_i / variance;
+            }
+            let scores = score_rows(&x_mat, &factors);
+            let leverages = glm_leverages(&x_mat, &cov_unscaled, &w_final);
+            sandwich_from_scores(&cov_unscaled, &scores, Some(&leverages), &self.covariance)?
+        };
         let covariance_matrix: Vec<Vec<f64>> = (0..ncols)
-            .map(|i| {
-                (0..ncols)
-                    .map(|j| cov_unscaled[(i, j)] * dispersion)
-                    .collect()
-            })
+            .map(|i| (0..ncols).map(|j| cov[(i, j)]).collect())
             .collect();
         let design_matrix: Vec<Vec<f64>> = (0..n)
             .map(|i| (0..ncols).map(|j| x_mat[(i, j)]).collect())
@@ -1469,6 +1573,16 @@ impl InverseGaussianResult {
     pub fn link(&self) -> InverseGaussianLink {
         self.link
     }
+
+    /// Predict the mean response for raw X rows, without the intercept column.
+    pub fn predict(&self, x: &[Vec<f64>]) -> Vec<f64> {
+        x.iter()
+            .map(|row| {
+                let eta = linear_predict(row, &self.coefficients, &self.feature_names);
+                self.link.linkinv(eta)
+            })
+            .collect()
+    }
 }
 
 /// Inverse-Gaussian regression builder for positive continuous outcomes with
@@ -1479,6 +1593,7 @@ pub struct InverseGaussian {
     max_iter: usize,
     tolerance: f64,
     link: InverseGaussianLink,
+    covariance: CovType,
 }
 
 impl Default for InverseGaussian {
@@ -1498,6 +1613,7 @@ impl InverseGaussian {
             max_iter: 100,
             tolerance: 1e-8,
             link: InverseGaussianLink::Log,
+            covariance: CovType::Nonrobust,
         }
     }
 
@@ -1516,6 +1632,30 @@ impl InverseGaussian {
     /// Set the link function. Defaults to [`InverseGaussianLink::Log`].
     pub fn with_link(mut self, link: InverseGaussianLink) -> Self {
         self.link = link;
+        self
+    }
+
+    /// Use a sandwich covariance estimator for standard errors.
+    pub fn with_covariance(mut self, covariance: CovType) -> Self {
+        self.covariance = covariance;
+        self
+    }
+
+    /// HC1 robust standard errors.
+    pub fn robust(mut self) -> Self {
+        self.covariance = CovType::Hc1;
+        self
+    }
+
+    /// Newey–West HAC standard errors.
+    pub fn hac(mut self, lags: usize) -> Self {
+        self.covariance = CovType::Hac { lags };
+        self
+    }
+
+    /// One-way cluster-robust standard errors.
+    pub fn cluster_robust(mut self, groups: Vec<usize>) -> Self {
+        self.covariance = CovType::Cluster { groups };
         self
     }
 
@@ -1639,7 +1779,7 @@ impl InverseGaussian {
             let variance = (mu_i * mu_i * mu_i).max(1e-24);
             w_final[i] = (safe_slope * safe_slope) / variance;
         }
-        let w_diag = DMatrix::from_diagonal(&DVector::from_vec(w_final));
+        let w_diag = DMatrix::from_diagonal(&DVector::from_column_slice(&w_final));
         let xtwx = x_mat.transpose() * &w_diag * &x_mat;
 
         let pearson_chi_squared: f64 = y
@@ -1654,12 +1794,21 @@ impl InverseGaussian {
         let dispersion = pearson_chi_squared / df_resid;
 
         let cov_unscaled = xtwx.try_inverse().ok_or(InferustError::SingularMatrix)?;
+        let cov = if matches!(self.covariance, CovType::Nonrobust) {
+            &cov_unscaled * dispersion
+        } else {
+            let mut factors = vec![0.0; n];
+            for i in 0..n {
+                let (mu_i, dmu_deta_i) = self.link.mu_and_derivative(eta[i]);
+                let variance = (mu_i * mu_i * mu_i).max(1e-24);
+                factors[i] = (y[i] - mu_i) * dmu_deta_i / variance;
+            }
+            let scores = score_rows(&x_mat, &factors);
+            let leverages = glm_leverages(&x_mat, &cov_unscaled, &w_final);
+            sandwich_from_scores(&cov_unscaled, &scores, Some(&leverages), &self.covariance)?
+        };
         let covariance_matrix: Vec<Vec<f64>> = (0..ncols)
-            .map(|i| {
-                (0..ncols)
-                    .map(|j| cov_unscaled[(i, j)] * dispersion)
-                    .collect()
-            })
+            .map(|i| (0..ncols).map(|j| cov[(i, j)]).collect())
             .collect();
         let coefficients: Vec<f64> = beta.iter().cloned().collect();
         let std_errors: Vec<f64> = (0..ncols).map(|i| covariance_matrix[i][i].sqrt()).collect();
@@ -1739,6 +1888,32 @@ pub fn likelihood_ratio_test(
         df,
         p_value: 1.0 - chi_squared.cdf(statistic.max(0.0)),
     })
+}
+
+fn score_rows(x_mat: &DMatrix<f64>, factors: &[f64]) -> Vec<Vec<f64>> {
+    (0..x_mat.nrows())
+        .map(|i| {
+            (0..x_mat.ncols())
+                .map(|j| x_mat[(i, j)] * factors[i])
+                .collect()
+        })
+        .collect()
+}
+
+fn glm_leverages(x_mat: &DMatrix<f64>, bread: &DMatrix<f64>, weights: &[f64]) -> Vec<f64> {
+    let n = x_mat.nrows();
+    let k = x_mat.ncols();
+    let mut leverage = Vec::with_capacity(n);
+    for i in 0..n {
+        let mut h = 0.0;
+        for j in 0..k {
+            for l in 0..k {
+                h += x_mat[(i, j)] * bread[(j, l)] * x_mat[(i, l)];
+            }
+        }
+        leverage.push(h * weights[i]);
+    }
+    leverage
 }
 
 fn linear_predict(row: &[f64], coefficients: &[f64], feature_names: &[String]) -> f64 {

@@ -2181,6 +2181,11 @@ impl Sarima {
         self
     }
 
+    /// Estimation method selected on the builder.
+    pub fn method(&self) -> ArimaMethod {
+        self.method
+    }
+
     /// Override the maximum optimiser iterations (default 3000).
     pub fn max_iter(mut self, n: usize) -> Self {
         self.max_iter = n;
@@ -2726,10 +2731,20 @@ impl Sarimax {
         self
     }
 
+    /// Joint Kalman MLE of the exogenous coefficients and the residual SARIMA.
+    pub fn exact_mle(mut self) -> Self {
+        self.inner = self.inner.exact_mle();
+        self
+    }
+
     /// Fit SARIMAX.
     ///
     /// * `y`  — response series (length n).
     /// * `x`  — exogenous regressors (n rows × k cols).
+    ///
+    /// The default is two-step OLS + SARIMA. [`.exact_mle()`](Self::exact_mle)
+    /// estimates `β` and the ARMA parameters jointly on the Kalman likelihood
+    /// of the (possibly seasonally expanded) residual process.
     pub fn fit(&self, y: &[f64], x: &[Vec<f64>]) -> Result<SarimaxResult> {
         let n = y.len();
         if x.len() != n {
@@ -2739,6 +2754,9 @@ impl Sarimax {
             });
         }
         let k = x[0].len();
+        if self.inner.method() == ArimaMethod::ExactMle {
+            return fit_sarimax_exact_mle(&self.inner, y, x);
+        }
 
         // OLS-project out exogenous variables
         let x_mat = DMatrix::from_fn(
@@ -2779,6 +2797,245 @@ impl Sarimax {
             sarima: sarima_result,
         })
     }
+}
+
+fn difference_series(y: &[f64], d: usize, ds: usize, s: usize) -> Vec<f64> {
+    let mut series = y.to_vec();
+    for _ in 0..ds {
+        if s == 0 || series.len() <= s {
+            break;
+        }
+        series = series[s..]
+            .iter()
+            .zip(series.iter())
+            .map(|(a, b)| a - b)
+            .collect();
+    }
+    for _ in 0..d {
+        if series.len() < 2 {
+            break;
+        }
+        series = series.windows(2).map(|w| w[1] - w[0]).collect();
+    }
+    series
+}
+
+fn y_minus_xbeta(y: &[f64], x: &[Vec<f64>], beta: &[f64]) -> Vec<f64> {
+    y.iter()
+        .enumerate()
+        .map(|(i, &yi)| {
+            let mut mu = beta.first().copied().unwrap_or(0.0);
+            for (j, &xj) in x[i].iter().enumerate() {
+                if let Some(&b) = beta.get(j + 1) {
+                    mu += b * xj;
+                }
+            }
+            yi - mu
+        })
+        .collect()
+}
+
+fn expanded_arma(
+    phi: &[f64],
+    theta: &[f64],
+    phi_s: &[f64],
+    theta_s: &[f64],
+    s: usize,
+) -> (Vec<f64>, Vec<f64>) {
+    let ar = if phi_s.is_empty() || s < 2 {
+        ar_polynomial(phi, 1)
+    } else {
+        poly_mul(&ar_polynomial(phi, 1), &ar_polynomial(phi_s, s))
+    };
+    let ma = if theta_s.is_empty() || s < 2 {
+        ma_polynomial(theta, 1)
+    } else {
+        poly_mul(&ma_polynomial(theta, 1), &ma_polynomial(theta_s, s))
+    };
+    let ar_coef: Vec<f64> = ar.iter().skip(1).map(|c| -c).collect();
+    let ma_coef: Vec<f64> = ma.iter().skip(1).copied().collect();
+    (trim_trailing_zeros(ar_coef), trim_trailing_zeros(ma_coef))
+}
+
+fn trim_trailing_zeros(mut coefs: Vec<f64>) -> Vec<f64> {
+    while coefs.last().is_some_and(|c| c.abs() < 1e-15) {
+        coefs.pop();
+    }
+    coefs
+}
+
+struct SarimaxOrders {
+    p: usize,
+    q: usize,
+    ps: usize,
+    qs: usize,
+    s: usize,
+    d: usize,
+    ds: usize,
+}
+
+impl SarimaxOrders {
+    fn from_sarima(spec: &Sarima) -> Self {
+        Self {
+            p: spec.p,
+            q: spec.q,
+            ps: spec.ps,
+            qs: spec.qs,
+            s: spec.s,
+            d: spec.d,
+            ds: spec.ds,
+        }
+    }
+
+    fn n_arma(&self) -> usize {
+        self.p + self.q + self.ps + self.qs
+    }
+}
+
+fn sarimax_mle_objective(params: &[f64], y: &[f64], x: &[Vec<f64>], spec: &SarimaxOrders) -> f64 {
+    let k_exog = x.first().map(|r| r.len() + 1).unwrap_or(1);
+    if params.len() != k_exog + spec.n_arma() + 1 {
+        return f64::INFINITY;
+    }
+    let sigma2 = params[params.len() - 1].exp();
+    if sigma2 <= 1e-12 || !sigma2.is_finite() {
+        return f64::INFINITY;
+    }
+    let beta = &params[..k_exog];
+    let mut idx = k_exog;
+    let phi = &params[idx..idx + spec.p];
+    idx += spec.p;
+    let theta = &params[idx..idx + spec.q];
+    idx += spec.q;
+    let phi_s = &params[idx..idx + spec.ps];
+    idx += spec.ps;
+    let theta_s = &params[idx..idx + spec.qs];
+    for &c in phi.iter().chain(theta).chain(phi_s).chain(theta_s) {
+        if c.abs() >= 0.999 {
+            return f64::INFINITY;
+        }
+    }
+    let resid = y_minus_xbeta(y, x, beta);
+    let series = difference_series(&resid, spec.d, spec.ds, spec.s);
+    if series.len() < 4 {
+        return f64::INFINITY;
+    }
+    let (ar, ma) = expanded_arma(phi, theta, phi_s, theta_s, spec.s);
+    match LinearGaussianModel::arma(0.0, &ar, &ma, sigma2) {
+        Ok(model) => match model.filter(&series) {
+            Ok(out) => -out.log_likelihood,
+            Err(_) => f64::INFINITY,
+        },
+        Err(_) => f64::INFINITY,
+    }
+}
+
+fn sarimax_mle_gradient(
+    params: &[f64],
+    y: &[f64],
+    x: &[Vec<f64>],
+    spec: &SarimaxOrders,
+) -> Vec<f64> {
+    let h = 1e-6;
+    let f0 = sarimax_mle_objective(params, y, x, spec);
+    let mut grad = vec![0.0; params.len()];
+    let mut ph = params.to_vec();
+    for i in 0..params.len() {
+        ph[i] += h;
+        let f1 = sarimax_mle_objective(&ph, y, x, spec);
+        if f0.is_finite() && f1.is_finite() {
+            grad[i] = (f1 - f0) / h;
+        }
+        ph[i] = params[i];
+    }
+    grad
+}
+
+fn fit_sarimax_exact_mle(inner: &Sarima, y: &[f64], x: &[Vec<f64>]) -> Result<SarimaxResult> {
+    let warm = Sarimax {
+        inner: inner.clone().with_method(ArimaMethod::Css),
+    }
+    .fit(y, x)?;
+    let spec = SarimaxOrders::from_sarima(inner);
+    let k_exog = warm.exog_coefficients.len();
+    let mut init = warm.exog_coefficients.clone();
+    init.extend_from_slice(&warm.sarima.ar_coefficients);
+    init.resize(k_exog + spec.p, 0.0);
+    init.extend_from_slice(&warm.sarima.ma_coefficients);
+    init.resize(k_exog + spec.p + spec.q, 0.0);
+    init.extend_from_slice(&warm.sarima.seasonal_ar);
+    init.resize(k_exog + spec.p + spec.q + spec.ps, 0.0);
+    init.extend_from_slice(&warm.sarima.seasonal_ma);
+    init.resize(k_exog + spec.p + spec.q + spec.ps + spec.qs, 0.0);
+    init.push(warm.sarima.sigma2.max(1e-6).ln());
+
+    let params = lbfgs_minimize(
+        &init,
+        |theta| sarimax_mle_objective(theta, y, x, &spec),
+        |theta| sarimax_mle_gradient(theta, y, x, &spec),
+        inner.max_iter.max(200),
+        inner.tolerance,
+    );
+    let f_opt = sarimax_mle_objective(&params, y, x, &spec);
+    let chosen = if f_opt.is_finite() && f_opt <= sarimax_mle_objective(&init, y, x, &spec) {
+        params
+    } else {
+        init
+    };
+
+    let beta = chosen[..k_exog].to_vec();
+    let mut idx = k_exog;
+    let ar_coefficients = chosen[idx..idx + spec.p].to_vec();
+    idx += spec.p;
+    let ma_coefficients = chosen[idx..idx + spec.q].to_vec();
+    idx += spec.q;
+    let seasonal_ar = chosen[idx..idx + spec.ps].to_vec();
+    idx += spec.ps;
+    let seasonal_ma = chosen[idx..idx + spec.qs].to_vec();
+    let sigma2 = chosen[chosen.len() - 1].exp();
+    let resid = y_minus_xbeta(y, x, &beta);
+    let series = difference_series(&resid, spec.d, spec.ds, spec.s);
+    let (ar_exp, ma_exp) = expanded_arma(
+        &ar_coefficients,
+        &ma_coefficients,
+        &seasonal_ar,
+        &seasonal_ma,
+        spec.s,
+    );
+    let filtered = LinearGaussianModel::arma(0.0, &ar_exp, &ma_exp, sigma2)?.filter(&series)?;
+    let n = filtered.forecast_errors.len();
+    let nparam = chosen.len() as f64;
+    let ll = filtered.log_likelihood;
+    let fitted_values: Vec<f64> = series
+        .iter()
+        .zip(filtered.forecast_errors.iter())
+        .map(|(yi, e)| yi - e)
+        .collect();
+
+    Ok(SarimaxResult {
+        exog_coefficients: beta,
+        exog_names: warm.exog_names,
+        sarima: SarimaResult {
+            intercept: 0.0,
+            ar_coefficients,
+            ma_coefficients,
+            seasonal_ar,
+            seasonal_ma,
+            residuals: filtered.forecast_errors.clone(),
+            fitted_values,
+            sigma2,
+            log_likelihood: ll,
+            aic: -2.0 * ll + 2.0 * nparam,
+            bic: -2.0 * ll + nparam * (n as f64).ln(),
+            n,
+            original_tails: Vec::new(),
+            seasonal_tails: Vec::new(),
+            last_residuals: filtered.forecast_errors,
+            s: spec.s,
+            d: spec.d,
+            ds: spec.ds,
+        },
+    })
 }
 
 impl SarimaxResult {
@@ -2829,6 +3086,22 @@ mod sarima_tests {
         let x: Vec<Vec<f64>> = (0..48).map(|i| vec![(i % 2) as f64]).collect();
         let res = Sarimax::new(1, 0, 0, 0, 1, 0, 12).fit(&y, &x).unwrap();
         assert_eq!(res.exog_coefficients.len(), 2); // const + 1 exog
+    }
+
+    #[test]
+    fn sarimax_exact_mle_joint_likelihood_is_finite() {
+        let y: Vec<f64> = (0..40)
+            .map(|i| 0.8 * (i as f64) + 1.5 * ((i % 2) as f64) + 0.3 * ((i as f64) * 0.4).sin())
+            .collect();
+        let x: Vec<Vec<f64>> = (0..40).map(|i| vec![(i % 2) as f64]).collect();
+        let res = Sarimax::new(1, 0, 0, 0, 0, 0, 12)
+            .exact_mle()
+            .max_iter(80)
+            .fit(&y, &x)
+            .unwrap();
+        assert!(res.sarima.log_likelihood.is_finite());
+        assert_eq!(res.exog_coefficients.len(), 2);
+        assert!(res.exog_coefficients[1].is_finite());
     }
 }
 

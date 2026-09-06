@@ -2,6 +2,30 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.8.0] - 2026-09-05
+
+### Added
+
+- **Unified results** - `ModelResult` now exposes `nobs`, `predict`, and
+  `predict_interval`. `Prediction` carries mean / SE / Wald bounds.
+  `summary()` returns a `Display` value; OLS `summary()` is a `String`.
+- **Formula front door** - `Design` alias, plus `DataFrame` methods for
+  `gamma`, `glm`, `inverse_gaussian`, `robust`, `panel_fe` / `panel_time_fe`
+  / `panel_re`, and `mixed`. `df.predict` / `df.predict_interval` take a
+  fitted result and the same formula.
+- **State-space engine** - Kalman RTS smoother, `Z`/`T`/`R`/`H`/`Q`
+  accessors, and multi-step forecasts. `Sarimax::exact_mle()` jointly
+  estimates exog + SARIMA on the Kalman likelihood (default remains
+  two-step OLS + SARIMA).
+- **Shared `CovType`** - HC0–HC3, HAC, and cluster sandwich on GLM
+  (logistic/Poisson/Gamma/IG), discrete (probit/NB2), and panel FE
+  (`.robust()` / `.with_covariance()` / `.cluster_robust()`).
+  `OlsCovariance` is now an alias for `CovType`.
+
+### Notes
+
+- VARMAX full statespace MLE and VECM β/α/Γ remain future work.
+
 ## [0.7.0] - 2026-08-11
 
 ### Added

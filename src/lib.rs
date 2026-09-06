@@ -11,7 +11,7 @@
 //! | [`gam`] | Gaussian additive models with spline basis expansion |
 //! | [`gmm`] | Instrumental variables / 2SLS econometrics starter |
 //! | [`survival`] | Kaplan-Meier estimator, log-rank test, Cox proportional hazards regression |
-//! | [`statespace`] | Scalar Kalman filter and local-level state-space model |
+//! | [`statespace`] | Linear-Gaussian Kalman filter, RTS smoother, and forecasts |
 //! | [`time_series`] | ARIMA/SARIMA/SARIMAX via CSS or exact state-space MLE, VAR/VECM/VARMAX, AR, ACF/PACF, Ljung-Box, ADF unit root, KPSS stationarity, Granger causality, Engle-Granger cointegration |
 //! | [`hypothesis`] | t-tests, chi-squared, ANOVA, Tukey HSD post-hoc, multiple-testing corrections (Bonferroni/Holm/BH/BY), Mann-Whitney U, Kruskal-Wallis, Wilcoxon signed-rank, sign test, KS tests, Shapiro-Wilk, Anderson-Darling, Lilliefors, Wald linear-restriction tests |
 //! | [`contingency`] | 2x2 tables, odds/risk ratios, McNemar, CMH |
@@ -28,14 +28,14 @@
 //! | [`gee`] | Independence-working-correlation GEE |
 //! | [`mixed`] | Random-intercept mixed linear model |
 //! | [`descriptive`] | Summary stats (mean, std, skewness, kurtosis, quartiles) |
-//! | [`data`] | Named-column DataFrame with formula API: `y ~ C(g) + x1*x2 - 1 + offset(e)` |
+//! | [`data`] | Named-column DataFrame with formula API for OLS/GLM/panel/robust/mixed and `predict` |
 //! | [`correlation`] | Pearson, Spearman, correlation matrices |
 //!
 //! ## OLS covariance options
 //!
-//! [`regression::Ols`] defaults to classical (homoskedastic) standard errors.
-//! Switch with `.robust()` (HC1), `.with_covariance(OlsCovariance::Hc3)`, or
-//! `.hac(lags)` (Newey-West) for time series regressions.
+//! [`regression::Ols`], GLM, discrete, and panel builders share [`covariance::CovType`].
+//! Switch with `.robust()` (HC1), `.with_covariance(CovType::Hc3)`,
+//! `.hac(lags)` (Newey-West), or `.cluster_robust(groups)`.
 //!
 //! ## Formula syntax
 //!
@@ -73,6 +73,7 @@
 
 pub mod contingency;
 pub mod correlation;
+pub mod covariance;
 pub mod data;
 pub mod descriptive;
 pub mod diagnostics;
@@ -110,8 +111,8 @@ pub use error::{InferustError, Result};
 /// Build a formula string from Rust tokens.
 ///
 /// This is a lightweight convenience for APIs that accept `&str`, such as
-/// `DataFrame::ols`, `DataFrame::wls`, `DataFrame::logistic`, and
-/// `DataFrame::poisson`.
+/// `DataFrame::ols`, `DataFrame::glm`, `DataFrame::panel_fe`, and
+/// `DataFrame::predict`.
 ///
 /// # Example
 /// ```rust

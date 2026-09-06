@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use nalgebra::{DMatrix, DVector};
 use statrs::distribution::{ChiSquared, ContinuousCDF, StudentsT};
 
+use crate::covariance::CovType;
 use crate::error::{InferustError, Result};
 use crate::regression::{Ols, OlsResult};
 
@@ -31,6 +32,7 @@ pub struct PanelOls {
     /// (linearmodels-style within-df correction). Default is false.
     within_df: bool,
     cluster: PanelCluster,
+    ols_cov: Option<CovType>,
 }
 
 impl Default for PanelOls {
@@ -45,6 +47,7 @@ impl PanelOls {
             feature_names: Vec::new(),
             within_df: false,
             cluster: PanelCluster::None,
+            ols_cov: None,
         }
     }
 
@@ -79,6 +82,25 @@ impl PanelOls {
     pub fn cluster(mut self, groups: Vec<usize>) -> Self {
         self.cluster = PanelCluster::Custom(groups);
         self
+    }
+
+    /// Sandwich / HC / HAC covariance on the demeaned OLS step.
+    ///
+    /// [`CovType::Cluster`] is forwarded to [`Self::cluster`]. Cluster options
+    /// already on the builder take precedence over HC/HAC.
+    pub fn with_covariance(mut self, covariance: CovType) -> Self {
+        match covariance {
+            CovType::Cluster { groups } => {
+                self.cluster = PanelCluster::Custom(groups);
+            }
+            other => self.ols_cov = Some(other),
+        }
+        self
+    }
+
+    /// HC1 robust standard errors on the within regression.
+    pub fn robust(self) -> Self {
+        self.with_covariance(CovType::Hc1)
     }
 
     /// Fit `y ~ x` with entity fixed effects removed by within transformation.
@@ -149,7 +171,11 @@ impl PanelOls {
             .with_feature_names(self.feature_names.clone())
             .no_intercept();
         match &self.cluster {
-            PanelCluster::None => {}
+            PanelCluster::None => {
+                if let Some(cov) = &self.ols_cov {
+                    ols = ols.with_covariance(cov.clone());
+                }
+            }
             PanelCluster::Absorbing => {
                 ols = ols.cluster_robust(absorbing_ids.to_vec());
             }
