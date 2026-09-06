@@ -2,6 +2,14 @@
 
 All notable changes to `inferust` are documented here. This project follows semantic versioning while the crate is pre-1.0: minor releases may still refine APIs, and patch releases should stay compatible within the active public surface.
 
+## [0.8.1] - 2026-09-05
+
+### Fixed
+
+- **Parity harness path** - `scripts/parity_statsmodels.py --out` now accepts
+  only a fixture subdirectory name under `tests/fixtures/`, so the write
+  path cannot escape the repository.
+
 ## [0.8.0] - 2026-09-05
 
 ### Added

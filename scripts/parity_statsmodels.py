@@ -8,7 +8,7 @@ Output is one JSON file per (estimator, dataset) under
 
 Usage::
 
-    python3 scripts/parity_statsmodels.py [--out DIR]
+    python3 scripts/parity_statsmodels.py [--out NAME]
 
 Run after installing ``statsmodels`` (``pip install statsmodels``). The JSON
 files should be committed; Rust tests load them and compare each scalar /
@@ -21,6 +21,7 @@ import argparse
 import json
 import math
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -2741,24 +2742,38 @@ def run_varmax(n: int = 50, seed: int = 105) -> dict[str, Any]:
     }
 
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_FIXTURES_ROOT = _REPO_ROOT / "tests" / "fixtures"
+_SAFE_IDENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_]*$")
+
+
+def _fixture_dir(label: str) -> Path:
+    """Map ``--out`` to ``tests/fixtures/<basename>``; reject path components."""
+    safe = os.path.basename(label)
+    if not _SAFE_IDENT.fullmatch(safe):
+        raise SystemExit(f"--out must be a simple directory name, got {label!r}")
+    return _FIXTURES_ROOT / safe
+
+
 def emit(out_dir: Path, name: str, payload: dict[str, Any]) -> None:
+    if not _SAFE_IDENT.fullmatch(name):
+        raise ValueError(f"unsafe fixture name: {name!r}")
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / f"{name}.json"
     with target.open("w") as fh:
         json.dump(payload, fh, indent=1, sort_keys=True)
-    print(f"  wrote {target.relative_to(out_dir.parent.parent)}")
+    print(f"  wrote {target.relative_to(_REPO_ROOT)}")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--out",
-        type=Path,
-        default=Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "statsmodels",
-        help="Output directory (default tests/fixtures/statsmodels/)",
+        default="statsmodels",
+        help="Fixture subdirectory under tests/fixtures/ (default: statsmodels)",
     )
     args = parser.parse_args()
-    out: Path = args.out
+    out = _fixture_dir(args.out)
 
     print(f"writing fixtures to {out}")
 
