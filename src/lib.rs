@@ -1,6 +1,7 @@
 //! # inferust
 //!
-//! **Statistical modeling for Rust** - a `statsmodels`-inspired library.
+//! Fit statistical models in Rust and get a full summary: coefficients,
+//! standard errors, p-values, and fit statistics. Inspired by Python statsmodels.
 //!
 //! ## Modules
 //!

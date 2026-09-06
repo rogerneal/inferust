@@ -5,9 +5,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/rogerneal/inferust/ci.yml?branch=master)](https://github.com/rogerneal/inferust/actions)
 
-**Statistical modeling for Rust** -  a `statsmodels`-inspired library.
+Fit statistical models in Rust and get a full summary: coefficients, standard errors, p-values, confidence intervals, and fit statistics.
 
-`inferust` fills the gap between Python's `statsmodels` / `scipy.stats` and the Rust ecosystem. It gives you regression summaries, hypothesis tests, descriptive stats, and correlation matrices with the same depth of output you'd expect from Python -  p-values, confidence intervals, AIC/BIC, significance stars, and all.
+inferust is a statsmodels-style library. You can run OLS and other regressions, GLMs, time series, survival models, and hypothesis tests without leaving Rust.
 
 ---
 

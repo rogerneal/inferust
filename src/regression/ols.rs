@@ -977,7 +977,7 @@ fn newey_west_covariance(
     let k = x_mat.ncols();
 
     // Lag-0 (heteroskedasticity) term: Σ xₜxₜ'eₜ²
-    let mut meat = DMatrix::zeros(k, k);
+    let mut meat = DMatrix::<f64>::from_vec(k, k, vec![0.0_f64; k.saturating_mul(k)]);
     for i in 0..n {
         let e2 = residuals[i].powi(2);
         for j in 0..k {
@@ -990,7 +990,7 @@ fn newey_west_covariance(
     // Lag-l cross terms with Bartlett weights
     for lag in 1..=lags.min(n - 1) {
         let w = 1.0 - lag as f64 / (lags as f64 + 1.0); // Bartlett weight
-        let mut gamma = DMatrix::zeros(k, k);
+        let mut gamma = DMatrix::<f64>::from_vec(k, k, vec![0.0_f64; k.saturating_mul(k)]);
         for t in lag..n {
             let et = residuals[t];
             let et_lag = residuals[t - lag];
@@ -1000,9 +1000,11 @@ fn newey_west_covariance(
                 }
             }
         }
-        // Add symmetric contribution: γ(l) + γ(l)'
-        let gamma_t = gamma.transpose();
-        meat += (&gamma + &gamma_t) * w;
+        for j in 0..k {
+            for l in 0..k {
+                meat[(j, l)] += (gamma[(j, l)] + gamma[(l, j)]) * w;
+            }
+        }
     }
 
     xtx_inv * meat * xtx_inv
@@ -1028,9 +1030,9 @@ fn cluster_covariance(
     if g < 2 {
         return xtx_inv.clone() * f64::NAN;
     }
-    let mut meat = DMatrix::zeros(k, k);
+    let mut meat = DMatrix::<f64>::from_vec(k, k, vec![0.0_f64; k.saturating_mul(k)]);
     for cluster in unique {
-        let mut score = DVector::<f64>::zeros(k);
+        let mut score = vec![0.0_f64; k];
         for i in 0..n {
             if groups[i] == cluster {
                 for j in 0..k {
@@ -1038,7 +1040,11 @@ fn cluster_covariance(
                 }
             }
         }
-        meat += &score * score.transpose();
+        for i in 0..k {
+            for j in 0..k {
+                meat[(i, j)] += score[i] * score[j];
+            }
+        }
     }
     let correction = (g as f64 / (g - 1) as f64) * ((n - 1) as f64 / df_resid.max(1) as f64);
     xtx_inv * meat * xtx_inv * correction

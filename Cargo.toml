@@ -1,11 +1,11 @@
 [package]
 name = "inferust"
-version = "0.8.1"
+version = "0.8.2"
 edition = "2021"
 # Floor set by nalgebra 0.35 and statrs 0.19; verified with `cargo +1.89 check
 # --all-targets`. The optional `polars` feature needs a newer toolchain.
 rust-version = "1.89"
-description = "Statistical modeling for Rust - OLS/WLS regression, GLM, survival analysis, ARIMA/VAR, nonparametric tests, and more. A statsmodels-style library."
+description = "Fit regressions, GLMs, time series, and hypothesis tests in Rust, with statsmodels-style summaries."
 license = "MIT"
 repository = "https://github.com/rogerneal/inferust"
 homepage = "https://github.com/rogerneal/inferust"
